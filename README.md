@@ -1,9 +1,17 @@
 # mingpan-ai · 生辰八字排盘 + AI 命理解读
 
-给小红书命理服务用的手机网页：客户自己填写生辰 → 程序**精确排盘**（四柱、十神、五行、纳音、大运、流年）→ 大模型按"老师的文风"写一份解读（命局总论 / 过往验证 / 所问之事 / 未来运势 / 开运建议）。
+给小红书命理服务用的**手机聊天式**网页（像微信和"玄真大师"聊天）：
+
+1. 大师打招呼，客户用自然语言发生辰，如「95年农历八月十五早上8点 女 成都，想问感情」；
+2. 大模型只负责**提取信息**（JSON），缺什么追问什么，齐全后列出信息让客户**确认**；
+3. 服务端用万年历**精确排盘**（干支绝不交给大模型算），在聊天里发一张命盘卡片；
+4. 大模型按"老师的文风"**流式**写详批（命局总论 / 过往验证 / 所问之事 / 未来运势 / 开运建议，每节一个气泡）；
+5. 客户继续追问（"我明年能结婚吗""2019年是不是不顺"），大师基于已排好的命盘 + 流年数据回答（追问里提到的年份会自动补算流年）。
+
+对话记录、待确认信息和命盘资料保存在浏览器 localStorage，每次请求带上最近的对话，服务端无状态（适合云函数）。
 
 - 排盘：[`lunar-javascript`](https://github.com/6tail/lunar-javascript)（6tail 寿星万年历），结果确定、可复现；支持公历/农历（含闰月）、精确时间/时辰/不清楚时辰、常用城市真太阳时校正。
-- 解读：默认 **DeepSeek**，可切换 **通义千问（DashScope）**、**Gemini**、任意 **OpenAI 兼容接口**；**未配置 Key 时自动使用内置模板生成器**，演示也能完整出结果。
+- 解读：配置了 `MIMO_API_KEY` 时默认用**小米 MiMo `mimo-v2.6-pro`**（MiMo 当前最强模型），否则默认 **DeepSeek**；可切换 **通义千问（DashScope）**、**Gemini**、任意 **OpenAI 兼容接口**；**未配置 Key 时自动使用内置模板生成器**，演示也能完整出结果。
 - 文风：`style/style-guide.md`（语气规则）+ `style/examples/`（往期解读范例，作为 few-shot 注入提示词）。把老师的真实解读放进去，AI 就会模仿她的口吻。
 - 部署：既能 `node server.js` 一体运行，也能拆成「静态前端 + 云函数」。
 
@@ -12,20 +20,26 @@
 ## 目录
 
 ```
-public/            前端（index.html / style.css / app.js / config.js）
+public/            聊天前端（index.html / style.css / app.js / config.js）
+lib/chat.js        聊天流程：提取 → 确认 → 排盘 → 流式详批 → 追问
+lib/parse.js       规则版出生信息解析（无 Key 时兜底）
 lib/bazi.js        排盘（四柱、十神、五行旺衰、喜用神、大运、流年、刑冲合）
 lib/cities.js      城市经度表（真太阳时）
 lib/prompt.js      组装提示词（读取 prompts/ 与 style/）
 lib/llm.js         大模型调用层（deepseek / qwen / gemini / openai 兼容）
 lib/fallback.js    无 Key 时的模板解读
 lib/handler.js     与平台无关的业务入口
-prompts/reading.md     ★ 解读提示词模板（可直接改措辞）
+prompts/reading.md     ★ 首次详批提示词（可直接改措辞）
+prompts/chat.md        ★ 追问对答提示词
+prompts/extract.md     出生信息提取提示词（输出 JSON）
 prompts/style-draft.md 起草文风指南用的提示词
 style/style-guide.md   ★ 文风指南
 style/examples/        ★ 往期解读范例（.md/.txt，按文件名排序取前 3 篇）
 scripts/draft-style-guide.js  从聊天记录/解读文本自动起草文风指南
 scripts/test-charts.js        排盘正确性自测
-scripts/screenshot.js         手机视口截图
+scripts/screenshot.js         聊天界面手机截图（走真实后端）
+scripts/chat-demo.js          端到端聊天演示，输出 samples/chat-transcript.md
+scripts/gen-samples.js        生成两份样例详批到 samples/
 functions/cloudbase/   腾讯云 CloudBase 云函数入口
 functions/aliyun-fc/   阿里云函数计算（事件函数）入口
 server.js / Dockerfile 一体化运行 / 容器部署（云托管、FC Web 函数）
@@ -40,17 +54,24 @@ npm start                # 打开 http://localhost:3000
 npm test                 # 排盘自测（4 个已知命例）
 ```
 
+## 接口
+- `POST /api/chat`（主接口，SSE 流式）：请求 `{ messages:[{role,content}], pending, profile, action }`；事件 `text`（整条气泡）、`delta`（流式片段）、`bubble`（开始新一段流式回答）、`chart`（命盘数据）、`pending`（待确认信息）、`profile`（已确认资料）、`quick`（快捷回复）、`done`、`error`。
+- 云函数不支持 SSE 时，同一接口返回 `{ events:[[event,data],...] }`，前端自动逐条回放（体验上是一次性出现）。想要真正的流式效果，请用「云托管」或「FC Web 函数」运行 `server.js`。
+- `POST /api/reading`、`POST /api/chart`：旧的表单式接口，保留可用。
+
 ## 配置大模型
 
 在 `.env` 或云平台「环境变量」里设置：
 
 | 提供方 | 变量 | 默认模型 |
 |---|---|---|
-| DeepSeek（默认） | `LLM_PROVIDER=deepseek` `DEEPSEEK_API_KEY=sk-...` | `deepseek-chat`（`DEEPSEEK_MODEL` 可改） |
+| 小米 MiMo（有 Key 时默认） | `LLM_PROVIDER=mimo` `MIMO_API_KEY=sk-...` | `mimo-v2.6-pro`（`MIMO_MODEL`；`mimo-v2.6-flash` 更快更便宜；`MIMO_THINKING=enabled` 开启深度思考） |
+| DeepSeek（无 MiMo Key 时默认） | `LLM_PROVIDER=deepseek` `DEEPSEEK_API_KEY=sk-...` | `deepseek-chat`（`DEEPSEEK_MODEL` 可改） |
 | 通义千问 | `LLM_PROVIDER=qwen` `DASHSCOPE_API_KEY=sk-...` | `qwen-plus`（`QWEN_MODEL`） |
 | Gemini | `LLM_PROVIDER=gemini` `GEMINI_API_KEY=...` | `gemini-2.5-flash`（`GEMINI_MODEL`；`GEMINI_BASE_URL` 可填反代） |
 | 其他兼容接口 | `LLM_PROVIDER=openai` `LLM_BASE_URL` `LLM_API_KEY` `LLM_MODEL` | —（Kimi、智谱、硅基流动等） |
 
+- MiMo Key：<https://platform.xiaomimimo.com>（接口 `https://api.xiaomimimo.com/v1`，OpenAI 兼容）。`.env` 里可以写 `MIMO_API_KEY=${MIMO_API_KEY}` 引用系统环境变量，Key 不进仓库。
 - DeepSeek Key：<https://platform.deepseek.com> ；通义 Key：阿里云「百炼」控制台。
 - **Gemini 在中国大陆服务器无法直连**：要么部署到海外/香港，要么设置 `GEMINI_BASE_URL` 指向你自己的代理；大陆部署建议直接用 DeepSeek 或通义。
 - 调用失败时自动回退到模板解读，页面不会报错（右下角会显示"模板解读"）。
@@ -95,8 +116,18 @@ npm test                 # 排盘自测（4 个已知命例）
   3. 部署在**香港/海外**服务器，无需备案（方案 A），速度略慢。
 - 小红书站内直接放外链容易被限流，常见做法是在私信里发链接、或做成图片里的二维码。
 
+## 接口保护
+- 按 IP 限流（`/api/chat`、`/api/reading`）：`RATE_LIMIT_PER_MIN`（默认 8 次/分钟）、`RATE_LIMIT_PER_DAY`（默认 100 次/天），超出返回 429。内存计数，单实例有效；多实例部署建议再加网关限流。
+- 请求体上限：`MAX_BODY_BYTES`（默认 64KB，含对话历史），超出返回 413；服务端只取最近 20 条消息，单条用户消息截断到 500 字。
+- 部署在反向代理/网关后面时设置 `TRUST_PROXY=1` 以识别真实 IP。
+
+## 样例
+`samples/` 下：两份真实大模型详批（含排盘数据、耗时和 token 用量，`node scripts/gen-samples.js`），以及一段完整聊天记录 `chat-transcript.md`（`node scripts/chat-demo.js`）。
+
 ## 已知限制
 - 旺衰/喜用神使用简化的"扶抑法"打分（天干 + 藏干权重 × 月令系数），对从格、化气格等特殊格局不做判断；需要更精细的可在 `lib/bazi.js` 调整。
 - 子时采用"晚子时日柱不换日"（lunar-javascript sect=2）。选"时辰"时按该时辰起点（如辰时=08:00）排盘，不做真太阳时校正；真太阳时仅在"准确时间 + 能识别城市"时生效（内置约 50 个城市）。
+- 填写出生城市会做真太阳时校正（如成都早上 8:00 → 约 06:59，卯时）；临近时辰边界时，时柱会因此变化，确认信息时可提醒客户。
+- 大模型首次详批约 30～50 秒（流式输出，第一个字几秒内出现），追问约 10 秒。
 - 过往验证是基于流年十神与刑冲合的**概率性描述**，并非真实事件，措辞已刻意保持弹性。
-- 无用户系统、无支付、无数据存储；生产环境建议加接口限流（防止 Key 被刷）。
+- 无用户系统、无支付、服务端不存储对话；限流为单实例内存计数。
