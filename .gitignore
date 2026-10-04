@@ -1,0 +1,7 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+style/style-guide.draft.md
+.DS_Store

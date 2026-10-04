@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover" />
+<title>观星阁 · 生辰八字详批</title>
+<meta name="theme-color" content="#8b1a1a" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="seal">命</div>
+    <h1>观星阁 · 八字详批</h1>
+    <p class="sub">以生辰排四柱 · 观大运流年 · 问前程吉凶</p>
+  </header>
+
+  <section id="formView">
+    <form id="form" class="card scroll">
+      <div class="card-title"><span>壹</span>填写生辰</div>
+
+      <label class="field"><span class="lab">姓名 / 昵称 <i>选填</i></span>
+        <input name="name" maxlength="12" placeholder="如：小鱼" /></label>
+
+      <div class="field"><span class="lab">性别</span>
+        <div class="seg" data-name="gender">
+          <button type="button" class="on" data-v="女">女</button><button type="button" data-v="男">男</button>
+        </div></div>
+
+      <div class="field"><span class="lab">出生日期</span>
+        <div class="seg small" data-name="calendar">
+          <button type="button" class="on" data-v="solar">公历</button><button type="button" data-v="lunar">农历</button>
+        </div>
+        <div class="row3">
+          <select name="year" id="year"></select><select name="month" id="month"></select><select name="day" id="day"></select>
+        </div>
+        <label class="check" id="leapWrap" hidden><input type="checkbox" name="leap" /> 闰月</label>
+      </div>
+
+      <div class="field"><span class="lab">出生时间</span>
+        <div class="seg small" data-name="timeMode">
+          <button type="button" class="on" data-v="exact">准确时间</button><button type="button" data-v="shichen">选时辰</button><button type="button" data-v="unknown">不清楚</button>
+        </div>
+        <input type="time" name="time" id="time" value="12:00" />
+        <select name="shichen" id="shichen" hidden>
+          <option value="子">子时 23:00–00:59</option><option value="丑">丑时 01:00–02:59</option><option value="寅">寅时 03:00–04:59</option>
+          <option value="卯">卯时 05:00–06:59</option><option value="辰">辰时 07:00–08:59</option><option value="巳">巳时 09:00–10:59</option>
+          <option value="午" selected>午时 11:00–12:59</option><option value="未">未时 13:00–14:59</option><option value="申">申时 15:00–16:59</option>
+          <option value="酉">酉时 17:00–18:59</option><option value="戌">戌时 19:00–20:59</option><option value="亥">亥时 21:00–22:59</option>
+        </select>
+        <p class="hint" id="unknownHint" hidden>不清楚时辰也可以算，以年、月、日三柱为主，细节略有出入。</p>
+      </div>
+
+      <label class="field"><span class="lab">出生城市 <i>选填 · 用于真太阳时校正</i></span>
+        <input name="city" list="cities" placeholder="如：成都" /><datalist id="cities"></datalist></label>
+
+      <div class="card-title"><span>贰</span>想问之事</div>
+      <div class="chips" id="topics">
+        <button type="button" data-v="感情">💗 感情</button><button type="button" data-v="事业">💼 事业</button>
+        <button type="button" data-v="财运">💰 财运</button><button type="button" data-v="健康">🍵 健康</button><button type="button" data-v="学业">📚 学业</button>
+      </div>
+      <textarea name="question" maxlength="300" rows="3" placeholder="具体想问什么？例如：今年适合换工作吗？什么时候能遇到正缘？"></textarea>
+
+      <button class="submit" type="submit">开 始 排 盘</button>
+      <p class="hint center">信息仅用于本次排盘，不会保存</p>
+    </form>
+  </section>
+
+  <section id="loadingView" hidden>
+    <div class="card loading"><div class="bagua">☯</div><p id="loadingText">正在排四柱八字…</p></div>
+  </section>
+
+  <section id="resultView" hidden>
+    <div class="card mingpan" id="mingpan"></div>
+    <div class="card reading scroll" id="reading"></div>
+    <button class="submit ghost" id="again" type="button">再 测 一 位</button>
+  </section>
+
+  <footer>本页面内容基于传统命理文化生成，仅供娱乐参考，请理性看待。</footer>
+</div>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
