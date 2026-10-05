@@ -25,7 +25,7 @@ if (process.env.CORS_ORIGIN) app.use((req, res, next) => { // 仅在前后端分
 app.get('/favicon.ico', (req, res) => res.type('image/png').sendFile(path.join(__dirname, 'public/assets/icon-32.png'), { maxAge: '7d' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders(res, file) {
-    if (/\.html$/.test(file)) res.set('Cache-Control', 'no-cache');
+    if (/\.(html|js|css)$/.test(file) && !/[\\/]assets[\\/]/.test(file)) res.set('Cache-Control', 'no-cache');
     else if (/[\\/]assets[\\/]/.test(file)) res.set('Cache-Control', 'public, max-age=604800');
     else res.set('Cache-Control', 'public, max-age=3600');
     if (/\.webmanifest$/.test(file)) res.type('application/manifest+json');
@@ -44,14 +44,24 @@ const limited = (req, res, next) => {
 app.post('/api/reading', limited, wrap(handleReading));
 // 聊天接口：SSE 流式（event: text/delta/bubble/chart/pending/profile/quick/done/error）
 app.post('/api/chat', limited, async (req, res) => {
+  const t0 = Date.now(), tag = `[chat] ${req.ip} ${req.body?.action || (req.body?.profile ? 'followup' : 'extract')}`;
+  // ?stream=0：非流式，一次性返回全部事件（部分 App 内置浏览器对流式 fetch 支持不好时的兜底）
+  if (req.query.stream === '0') {
+    const events = [];
+    try { await handleChat(req.body, (e, d) => events.push([e, d])); }
+    catch (e) { console.error(e); events.push(['error', { error: '大师走神了，请再发一次～' }], ['done', {}]); }
+    console.log(`${tag} json ${Date.now() - t0}ms events=${events.length}`);
+    return res.set('Cache-Control', 'no-store').json({ events });
+  }
   res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
   res.flushHeaders();
-  let closed = false; res.on('close', () => (closed = true));
-  const emit = (event, data) => { if (!closed) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
-  const ping = setInterval(() => emit('ping', {}), 15000);
+  res.write(': ok\n\n'); // 立即下发首字节，避免移动网络 / 内置浏览器把"有响应头无数据"的连接当作超时
+  let closed = false, n = 0; res.on('close', () => (closed = true));
+  const emit = (event, data) => { if (!closed) { n++; res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); } };
+  const ping = setInterval(() => { if (!closed) res.write(': ping\n\n'); }, 5000);
   try { await handleChat(req.body, emit); }
   catch (e) { console.error(e); emit('error', { error: '大师走神了，请再发一次～' }); emit('done', {}); }
-  finally { clearInterval(ping); res.end(); }
+  finally { clearInterval(ping); console.log(`${tag} sse ${Date.now() - t0}ms events=${n}${closed ? ' CLIENT_CLOSED_EARLY' : ''}`); res.end(); }
 });
 app.post('/api/chart', wrap(handleChart));
 app.use((err, req, res, next) => { // 请求体过大 / JSON 格式错误

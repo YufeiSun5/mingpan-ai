@@ -116,28 +116,38 @@
       else if (ev === 'error') { dropTyping(); S.items.push({ type: 'bot', text: d.error }); renderItem(S.items[S.items.length - 1]); }
       save();
     };
+    const body = JSON.stringify({ messages: S.llm.slice(-16), pending: S.pending, profile: S.profile, action });
+    let got = 0, finished = false; // got：已收到的有效事件数
+    const handle = (ev, d) => { if (ev === 'done') finished = true; else if (ev !== 'ping') got++; on(ev, d); };
+    const parseSSE = (buf, flush) => {
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0 || (flush && buf.trim() && (i = buf.length) >= 0)) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (block.match(/^event: (.*)$/m) || [])[1], data = (block.match(/^data: (.*)$/m) || [])[1];
+        if (ev && data) { let d; try { d = JSON.parse(data); } catch { continue; } handle(ev, d); }
+      }
+      return buf;
+    };
+    const post = async (url) => {
+      const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, cache: 'no-store' });
+      const ct = r.headers.get('content-type') || '';
+      if (!r.ok && !ct.includes('event-stream')) { const j = await r.json().catch(() => ({})); const e = new Error(j.error || ''); e.server = !!j.error; throw e; }
+      if (ct.includes('application/json')) { (await r.json()).events.forEach(([e, d]) => handle(e, d)); return; }
+      if (!r.body || !r.body.getReader) { parseSSE(await r.text(), true); return; } // 不支持流式读取的内置浏览器
+      const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+      for (;;) { const { value, done } = await reader.read(); if (done) break; buf = parseSSE(buf + dec.decode(value, { stream: true })); }
+      parseSSE(buf + dec.decode(), true);
+    };
+    const FRIENDLY = '网络有点不稳定，大师没收到完整回复 🙏 请再发一次试试～（如在微信里打开，也可以点右上角用浏览器打开）';
     try {
-      const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: S.llm.slice(-16), pending: S.pending, profile: S.profile, action }) });
-      if (!r.ok && !(r.headers.get('content-type') || '').includes('event-stream')) {
-        const j = await r.json().catch(() => ({})); throw new Error(j.error || '网络开小差了');
+      try { await post(API); if (!finished) throw new Error('incomplete'); }
+      catch (e) {
+        if (e.server) throw e;
+        // 流式失败：若还没收到任何内容，改用非流式接口自动重试一次（部分 App 内置浏览器流式 fetch 不稳定）
+        if (got === 0) { await new Promise((ok) => setTimeout(ok, 600)); await post(API + '?stream=0'); if (!finished) throw new Error('incomplete'); }
+        else throw e;
       }
-      if ((r.headers.get('content-type') || '').includes('application/json')) {
-        (await r.json()).events.forEach(([e, d]) => on(e, d)); // 云函数：非流式回放
-      } else {
-        const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
-        for (;;) {
-          const { value, done } = await reader.read(); if (done) break;
-          buf += dec.decode(value, { stream: true });
-          let i;
-          while ((i = buf.indexOf('\n\n')) >= 0) {
-            const block = buf.slice(0, i); buf = buf.slice(i + 2);
-            const ev = (block.match(/^event: (.*)$/m) || [])[1], data = (block.match(/^data: (.*)$/m) || [])[1];
-            if (ev && data) on(ev, JSON.parse(data));
-          }
-        }
-      }
-    } catch (e) { on('error', { error: (e.message || '网络开小差了') + '，请再发一次～' }); }
+    } catch (e) { on('error', { error: e.server ? e.message + '，请稍后再试～' : FRIENDLY }); }
     finally { endStream(); dropTyping(); busy = false; sendBtn.disabled = false; save(); scroll(); }
   }
 

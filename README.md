@@ -11,7 +11,7 @@
 对话记录、待确认信息和命盘资料保存在浏览器 localStorage，每次请求带上最近的对话，服务端无状态（适合云函数）。
 
 - 排盘：[`lunar-javascript`](https://github.com/6tail/lunar-javascript)（6tail 寿星万年历），结果确定、可复现；支持公历/农历（含闰月）、精确时间/时辰/不清楚时辰、常用城市真太阳时校正。
-- 解读：配置了 `MIMO_API_KEY` 时默认用**小米 MiMo `mimo-v2.6-pro`**（MiMo 当前最强模型），否则默认 **DeepSeek**；可切换 **通义千问（DashScope）**、**Gemini**、任意 **OpenAI 兼容接口**；**未配置 Key 时自动使用内置模板生成器**，演示也能完整出结果。
+- 解读：配置了 `MIMO_API_KEY` 时默认用**小米 MiMo `mimo-v2.6-flash`**（MiMo 当前最强模型），否则默认 **DeepSeek**；可切换 **通义千问（DashScope）**、**Gemini**、任意 **OpenAI 兼容接口**；**未配置 Key 时自动使用内置模板生成器**，演示也能完整出结果。
 - 文风：`style/style-guide.md`（语气规则）+ `style/examples/`（往期解读范例，作为 few-shot 注入提示词）。把老师的真实解读放进去，AI 就会模仿她的口吻。
 - 部署：既能 `node server.js` 一体运行，也能拆成「静态前端 + 云函数」。
 
@@ -67,7 +67,7 @@ npm test                 # 排盘自测（4 个已知命例）
 
 | 提供方 | 变量 | 默认模型 |
 |---|---|---|
-| 小米 MiMo（有 Key 时默认） | `LLM_PROVIDER=mimo` `MIMO_API_KEY=sk-...` | `mimo-v2.6-pro`（`MIMO_MODEL`；`mimo-v2.6-flash` 更快更便宜；`MIMO_THINKING=enabled` 开启深度思考） |
+| 小米 MiMo（有 Key 时默认） | `LLM_PROVIDER=mimo` `MIMO_API_KEY=sk-...` | `mimo-v2.6-flash`（`MIMO_MODEL`；`mimo-v2.6-flash` 更快更便宜；`MIMO_THINKING=enabled` 开启深度思考） |
 | DeepSeek（无 MiMo Key 时默认） | `LLM_PROVIDER=deepseek` `DEEPSEEK_API_KEY=sk-...` | `deepseek-chat`（`DEEPSEEK_MODEL` 可改） |
 | 通义千问 | `LLM_PROVIDER=qwen` `DASHSCOPE_API_KEY=sk-...` | `qwen-plus`（`QWEN_MODEL`） |
 | Gemini | `LLM_PROVIDER=gemini` `GEMINI_API_KEY=...` | `gemini-2.5-flash`（`GEMINI_MODEL`；`GEMINI_BASE_URL` 可填反代） |
