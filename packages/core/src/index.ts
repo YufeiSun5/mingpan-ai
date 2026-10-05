@@ -5,7 +5,7 @@ export * from './client';
 export * from './text';
 export * from './chatState';
 export { computeChart, shiShenOf, LUCK, checkDate } from './bazi';
-export { buildPro, proText, changSheng } from './pro';
+export { buildPro, proText, changSheng, columnOf } from './pro';
 export { parseBirth } from './parse';
 export { generateFallback } from './fallback';
 export { default as CITIES } from './cities';

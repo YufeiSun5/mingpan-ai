@@ -1,7 +1,7 @@
 // 确定性排盘：基于 6tail 的 lunar-javascript
 import { Solar, Lunar, LunarYear, LunarMonth } from 'lunar-javascript';
 import CITIES from './cities';
-import { buildPro } from './pro';
+import { buildPro, columnOf } from './pro';
 
 const GAN_WX = { 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' };
 const ZHI_WX = { 子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火', 午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水' };
@@ -123,7 +123,12 @@ function computeChart(input) {
 
   // 大运
   const yun = ec.getYun(g, 2);
-  const daYun = yun.getDaYun(10).slice(1).map((d) => ({
+  const daYunRaw = yun.getDaYun(12);
+  const xiaoYun = (() => {
+    const d = daYunRaw[0];
+    return d ? { ganZhi: '', startYear: d.getStartYear(), endYear: d.getEndYear(), startAge: d.getStartAge(), endAge: d.getEndAge(), shiShen: '小运', xiao: true as const } : null;
+  })();
+  const daYun = daYunRaw.slice(1).filter((d) => d.getGanZhi()).map((d) => ({
     ganZhi: d.getGanZhi(), startYear: d.getStartYear(), endYear: d.getEndYear(), startAge: d.getStartAge(), endAge: d.getEndAge(),
     shiShen: shiShenOf(dayGan, d.getGanZhi()[0]),
   }));
@@ -149,7 +154,7 @@ function computeChart(input) {
   const extraLiuNian = [...new Set((input.extraYears || []).map(Number))]
     .filter((y) => y >= solar.getYear() && y <= solar.getYear() + 100 && !liuNian.some((l) => l.year === y)).slice(0, 6).map(yearInfo);
 
-  return {
+  const chart = {
     input: { name: input.name || '', gender: g ? '男' : '女', calendar: input.calendar || 'solar', clockTime, timeUnknown, city: input.city || '' },
     trueSolar,
     solar: solar.toYmdHms(),
@@ -163,9 +168,29 @@ function computeChart(input) {
     luck: xi.map((w) => ({ wuXing: w, ...LUCK[w] })),
     yun: { startYear: yun.getStartYear(), startMonth: yun.getStartMonth(), startDay: yun.getStartDay(), startDate: yun.getStartSolar().toYmd(), forward },
     daYun, liuNian, extraLiuNian, nowYear,
-    taiYuan: ec.getTaiYuan(), mingGong: ec.getMingGong(),
-    pro: buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, timeUnknown, shiShenOf, solarYear: solar.getYear() }),
-  };
+    taiYuan: ec.getTaiYuan(), mingGong: ec.getMingGong(), shenGong: ec.getShenGong(),
+    xiaoYun,
+    pro: null as any,
+  } as any;
+  const gender = g ? '男' : '女';
+  const pro = buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, timeUnknown, shiShenOf, solarYear: solar.getYear(), solar, lunar, gender });
+  const ctx = { yearGan: pillars[0].gan, yearZhi: pillars[0].zhi, monthZhi: pillars[1].zhi, dayKong: pro.dayKong };
+  const withCol = (gz: string, label: string) => columnOf(dayGan, gz, { ...ctx, label });
+  for (const d of daYun) (d as any).col = withCol(d.ganZhi, '大运');
+  for (const y of liuNian) (y as any).col = withCol(y.ganZhi, '流年');
+  for (const y of extraLiuNian) (y as any).col = withCol(y.ganZhi, '流年');
+  for (const d of daYun) {
+    const years = [] as any[];
+    for (let y = d.startYear; y <= d.endYear; y++) years.push(yearInfo(y));
+    (d as any).liuNian = years.map((y) => ({ ...y, col: withCol(y.ganZhi, '流年') }));
+  }
+  if (xiaoYun) {
+    const years = [] as any[];
+    for (let y = xiaoYun.startYear; y <= xiaoYun.endYear; y++) years.push(yearInfo(y));
+    (xiaoYun as any).liuNian = years.map((y) => ({ ...y, col: withCol(y.ganZhi, '流年') }));
+  }
+  chart.pro = pro;
+  return chart;
 }
 
 const SS = ['比肩', '劫财', '食神', '伤官', '偏财', '正财', '七杀', '正官', '偏印', '正印'];

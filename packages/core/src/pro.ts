@@ -1,4 +1,6 @@
-// 专业排盘补充：星运/自坐/空亡/神煞/干支关系/旺相休囚死/格局/五神/命宫身宫胎元胎息/起运交运
+// 专业排盘补充：星运/自坐/空亡/旬首/神煞/干支关系/旺相休囚死/格局/五神/命宫身宫胎元胎息/起运交运/人元司令
+import { LunarUtil } from 'lunar-javascript';
+
 const GAN = '甲乙丙丁戊己庚辛壬癸', ZHI = '子丑寅卯辰巳午未申酉戌亥';
 const GAN_WX = { 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' };
 const ZHI_WX = { 子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火', 午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水' };
@@ -34,15 +36,41 @@ const TIANDE = { 寅: '丁', 卯: '申', 辰: '壬', 巳: '辛', 午: '亥', 未
 const YUEDE = { 寅午戌: '丙', 申子辰: '壬', 亥卯未: '甲', 巳酉丑: '庚' };
 const KUIGANG = ['庚辰', '庚戌', '壬辰', '戊戌'];
 
+function shenShaFor(zhi, gan, yearZhi, yearGan, dayGan, monthZhi, dayKong, opts: { isDay?: boolean; isYear?: boolean } = {}) {
+  const out = [];
+  const add = (n) => { if (!out.includes(n)) out.push(n); };
+  if (TIANYI[dayGan]?.includes(zhi) || TIANYI[yearGan]?.includes(zhi)) add('天乙贵人');
+  if (TAIJI[dayGan]?.includes(zhi) || TAIJI[yearGan]?.includes(zhi)) add('太极贵人');
+  if (WENCHANG[dayGan] === zhi || WENCHANG[yearGan] === zhi) add('文昌');
+  if (TIANDE[monthZhi] === gan || TIANDE[monthZhi] === zhi) add('天德');
+  if (YUEDE[SAN_HE_GROUP(monthZhi)] === gan) add('月德');
+  if (LU[dayGan] === zhi) add('禄神');
+  if (YANGREN[dayGan] === zhi) add('羊刃');
+  if (JINYU[dayGan] === zhi) add('金舆');
+  for (const base of [yearZhi]) {
+    const g = SAN_HE_GROUP(base);
+    if (!g) continue;
+    if (TAOHUA[g] === zhi) add('桃花');
+    if (YIMA[g] === zhi) add('驿马');
+    if (HUAGAI[g] === zhi) add('华盖');
+    if (JIANGXING[g] === zhi) add('将星');
+  }
+  if (!opts.isYear && HONGLUAN[yearZhi] === zhi) add('红鸾');
+  if (!opts.isYear && CHONG[HONGLUAN[yearZhi]] === zhi) add('天喜');
+  if (opts.isDay && KUIGANG.includes(gan + zhi)) add('魁罡');
+  if (!opts.isDay && dayKong && dayKong.includes(zhi)) add('空亡');
+  return out;
+}
+
 function shenSha(pillars, i, kong, timeUnknown) {
   const p = pillars[i], yp = pillars[0], dp = pillars[2], mz = pillars[1].zhi;
   const out = [];
   const add = (n) => { if (!out.includes(n)) out.push(n); };
   if (TIANYI[dp.gan].includes(p.zhi) || TIANYI[yp.gan].includes(p.zhi)) add('天乙贵人');
   if (TAIJI[dp.gan].includes(p.zhi) || TAIJI[yp.gan].includes(p.zhi)) add('太极贵人');
-  if (WENCHANG[dp.gan] === p.zhi || WENCHANG[yp.gan] === p.zhi) add('文昌贵人');
-  if (TIANDE[mz] === p.gan || TIANDE[mz] === p.zhi) add('天德贵人');
-  if (YUEDE[SAN_HE_GROUP(mz)] === p.gan) add('月德贵人');
+  if (WENCHANG[dp.gan] === p.zhi || WENCHANG[yp.gan] === p.zhi) add('文昌');
+  if (TIANDE[mz] === p.gan || TIANDE[mz] === p.zhi) add('天德');
+  if (YUEDE[SAN_HE_GROUP(mz)] === p.gan) add('月德');
   if (LU[dp.gan] === p.zhi) add('禄神');
   if (YANGREN[dp.gan] === p.zhi) add('羊刃');
   if (JINYU[dp.gan] === p.zhi) add('金舆');
@@ -87,7 +115,7 @@ function relations(pillars, timeUnknown) {
     if (pairHas(PO, a.zhi, b.zhi)) zhi.push(`${a.zhi}${b.zhi}相破（${tag}）`);
     if ((a.zhi === '子' && b.zhi === '卯') || (a.zhi === '卯' && b.zhi === '子')) zhi.push(`子卯相刑（${tag}）`);
     if (a.zhi === b.zhi && '辰午酉亥'.includes(a.zhi)) zhi.push(`${a.zhi}${a.zhi}自刑（${tag}）`);
-    for (const g of Object.keys(SAN_HE)) { // 半合（含中神）
+    for (const g of Object.keys(SAN_HE)) {
       if (a.zhi !== b.zhi && g.includes(a.zhi) && g.includes(b.zhi) && (a.zhi === g[1] || b.zhi === g[1])) zhi.push(`${a.zhi}${b.zhi}半合${SAN_HE[g]}（${tag}）`);
     }
     for (const [x, y, z, n] of XING3) if ([x, y, z].includes(a.zhi) && [x, y, z].includes(b.zhi) && a.zhi !== b.zhi) zhi.push(`${a.zhi}${b.zhi}相刑·${n}（${tag}）`);
@@ -95,17 +123,14 @@ function relations(pillars, timeUnknown) {
   const zs = ps.map((p) => p.zhi);
   for (const [g, w] of Object.entries(SAN_HE)) if ([...g].every((z) => zs.includes(z))) zhi.unshift(`${g}三合${w}局`);
   for (const [g, w] of Object.entries(SAN_HUI)) if ([...g].every((z) => zs.includes(z))) zhi.unshift(`${g}三会${w}方`);
-  // 半合字面重复去掉（三合成局时保留局）
   return { gan: [...new Set(gan)], zhi: [...new Set(zhi)] };
 }
 
-// 旺相休囚死（以月令五行为准）
 function wangXiang(monthZhi) {
   const m = ZHI_WX[monthZhi];
   return { [m]: '旺', [SHENG[m]]: '相', [SHENG_ME[m]]: '休', [KE_ME[m]]: '囚', [KE[m]]: '死' };
 }
 
-// 格局（月令取格：透干优先 本气>中气>余气；比劫月令→建禄/月刃，再看他神透干）
 function geJu(pillars, shiShenOf) {
   const dm = pillars[2].gan, hide = pillars[1].hideGan;
   const tou = [pillars[0].gan, pillars[1].gan, pillars[3]?.gan].filter(Boolean);
@@ -120,40 +145,141 @@ function geJu(pillars, shiShenOf) {
   return { name: ssBen + '格', note: `月令${pillars[1].zhi}本气${hide[0]}（未透）` };
 }
 
-function buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, timeUnknown, shiShenOf, solarYear }: any): any {
+/** 人元司令分野（节气后第几天由月支哪一藏干当令） */
+const REN_YUAN: Record<string, [string, number][]> = {
+  寅: [['戊', 7], ['丙', 7], ['甲', 16]],
+  卯: [['甲', 10], ['乙', 20]],
+  辰: [['乙', 9], ['癸', 3], ['戊', 18]],
+  巳: [['戊', 5], ['庚', 9], ['丙', 16]],
+  午: [['丙', 10], ['己', 9], ['丁', 11]],
+  未: [['丁', 9], ['乙', 3], ['己', 18]],
+  申: [['己', 7], ['壬', 3], ['庚', 20]],
+  酉: [['庚', 10], ['辛', 20]],
+  戌: [['辛', 9], ['丁', 3], ['戊', 18]],
+  亥: [['戊', 7], ['甲', 5], ['壬', 18]],
+  子: [['壬', 10], ['癸', 20]],
+  丑: [['癸', 9], ['辛', 3], ['己', 18]],
+};
+function renYuanSiLing(monthZhi: string, daysIntoJie: number) {
+  const segs = REN_YUAN[monthZhi];
+  if (!segs) return '';
+  let d = Math.max(1, Math.floor(daysIntoJie) + 1); // 节气当日为第 1 天
+  for (const [g, n] of segs) { if (d <= n) return g; d -= n; }
+  return segs[segs.length - 1][0];
+}
+
+const SS = ['比肩', '劫财', '食神', '伤官', '偏财', '正财', '七杀', '正官', '偏印', '正印'];
+function ssOf(dm, g) {
+  const a = GAN_WX[dm], b = GAN_WX[g], same = (GAN.indexOf(dm) % 2) === (GAN.indexOf(g) % 2);
+  let i;
+  if (a === b) i = 0; else if (SHENG[a] === b) i = 2; else if (KE[a] === b) i = 4; else if (KE_ME[a] === b) i = 6; else i = 8;
+  return SS[i + (same ? 0 : 1)];
+}
+
+/** 任意干支 → 一列专业排盘（流年/大运与四柱共用） */
+function columnOf(dayGan: string, ganZhi: string, ctx: {
+  label: string; yearGan: string; yearZhi: string; monthZhi: string; dayKong: string;
+  zhuXing?: string; unknown?: boolean;
+}) {
+  if (!ganZhi || ganZhi.length < 2 || ctx.unknown) {
+    return {
+      label: ctx.label, gan: '', zhi: '', ganWx: '' as any, zhiWx: '' as any,
+      zhuXing: ctx.zhuXing || '—', hide: [], xingYun: '—', ziZuo: '—',
+      kongWang: '—', xunShou: '—', naYin: '—', shenSha: [], unknown: true,
+    };
+  }
+  const gan = ganZhi[0], zhi = ganZhi[1];
+  const hideGan: string[] = (LunarUtil.ZHI_HIDE_GAN[zhi] || []).slice();
+  return {
+    label: ctx.label,
+    gan, zhi, ganWx: GAN_WX[gan], zhiWx: ZHI_WX[zhi],
+    zhuXing: ctx.zhuXing || ssOf(dayGan, gan),
+    hide: hideGan.map((g) => ({ gan: g, wx: GAN_WX[g], ss: ssOf(dayGan, g) })),
+    xingYun: changSheng(dayGan, zhi),
+    ziZuo: changSheng(gan, zhi),
+    kongWang: LunarUtil.getXunKong(ganZhi),
+    xunShou: LunarUtil.getXun(ganZhi),
+    naYin: LunarUtil.NAYIN[ganZhi] || '',
+    shenSha: shenShaFor(zhi, gan, ctx.yearZhi, ctx.yearGan, dayGan, ctx.monthZhi, ctx.dayKong, { isDay: ctx.label === '日柱', isYear: ctx.label === '年柱' }),
+  };
+}
+
+function jiaoYunText(yun: any) {
+  const sy = yun.getStartSolar();
+  const lunar = sy.getLunar();
+  const jie = lunar.getPrevJie();
+  const gan = lunar.getYearGan();
+  const other = GAN[(GAN.indexOf(gan) + 5) % 10];
+  const js = jie.getSolar();
+  const d0 = Date.UTC(js.getYear(), js.getMonth() - 1, js.getDay());
+  const d1 = Date.UTC(sy.getYear(), sy.getMonth() - 1, sy.getDay());
+  const days = Math.round((d1 - d0) / 86400000) + 1; // 与主流排盘软件一致：节气当日算起
+  return { text: `逢${gan}、${other}年 ${jie.getName()}后${days}天 交大运`, jie: jie.getName(), days, ganPair: [gan, other] as [string, string] };
+}
+
+function buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, timeUnknown, shiShenOf, solarYear, solar, lunar, gender }: any): any {
   const kongs = [ec.getYearXunKong(), ec.getMonthXunKong(), ec.getDayXunKong(), ec.getTimeXunKong()];
+  const xuns = [ec.getYearXun(), ec.getMonthXun(), ec.getDayXun(), ec.getTimeXun()];
   const dayKong = kongs[2];
+  const yearGan = pillars[0].gan, yearZhi = pillars[0].zhi, monthZhi = pillars[1].zhi;
+  const dayLabel = gender === '女' ? '元女' : '元男';
   const detail = pillars.map((p, i) => ({
-    label: p.label, zhuXing: i === 2 ? '日主' : p.shiShenGan,
-    hide: p.hideGan.map((g, k) => ({ gan: g, wx: GAN_WX[g], ss: p.shiShenZhi[k] })),
-    xingYun: changSheng(dayGan, p.zhi), ziZuo: changSheng(p.gan, p.zhi),
-    kongWang: kongs[i], naYin: p.naYin,
+    label: p.label,
+    gan: p.unknown ? '' : p.gan, zhi: p.unknown ? '' : p.zhi,
+    ganWx: p.ganWx, zhiWx: p.zhiWx,
+    zhuXing: i === 2 ? dayLabel : (p.unknown ? '—' : p.shiShenGan),
+    hide: p.unknown ? [] : p.hideGan.map((g, k) => ({ gan: g, wx: GAN_WX[g], ss: p.shiShenZhi[k] })),
+    xingYun: p.unknown ? '—' : changSheng(dayGan, p.zhi),
+    ziZuo: p.unknown ? '—' : changSheng(p.gan, p.zhi),
+    kongWang: p.unknown ? '—' : kongs[i],
+    xunShou: p.unknown ? '—' : xuns[i],
+    naYin: p.unknown ? '—' : p.naYin,
     shenSha: timeUnknown && i === 3 ? [] : shenSha(pillars, i, dayKong, timeUnknown),
+    unknown: !!p.unknown,
   }));
-  const wx = wangXiang(pillars[1].zhi);
+  const wx = wangXiang(monthZhi);
   const total = Object.values(power).reduce((a: number, b: any) => a + b, 0) as number || 1;
   const wuXing = Object.keys(power).map((k) => ({ wx: k, power: power[k], pct: Math.round((power[k] / total) * 100), state: wx[k] }));
   const all = ['木', '火', '土', '金', '水'];
   const wushen: Record<string, any> = { 用神: xi[0], 喜神: xi[1] || null, 忌神: ji[0] || null, 仇神: ji[1] || null };
   wushen.闲神 = all.filter((w) => !Object.values(wushen).includes(w)).join('') || null;
-  const sy = yun.getStartSolar();
+
+  // 人元司令：出生距上一节的天数
+  const prevJie = lunar.getPrevJie();
+  const jieS = prevJie.getSolar();
+  const daysInto = (Date.UTC(solar.getYear(), solar.getMonth() - 1, solar.getDay())
+    - Date.UTC(jieS.getYear(), jieS.getMonth() - 1, jieS.getDay())) / 86400000;
+  const renYuan = renYuanSiLing(monthZhi, daysInto);
+
+  const jy = jiaoYunText(yun);
+  const qiYun = `出生后${yun.getStartYear()}年${yun.getStartMonth()}个月${yun.getStartDay()}天${yun.getStartHour()}小时`;
+
+  const ctxBase = { yearGan, yearZhi, monthZhi, dayKong };
+
   return {
     pillars: detail,
     relations: relations(pillars, timeUnknown),
-    wuXing, monthLing: `${pillars[1].zhi}月${ZHI_WX[pillars[1].zhi]}旺`,
+    wuXing, monthLing: `${monthZhi}月${ZHI_WX[monthZhi]}旺`,
     strength: { label: strength === '偏旺' ? '身旺' : strength === '偏弱' ? '身弱' : '中和', score: Math.round(ratio * 100) },
     geJu: geJu(pillars, shiShenOf),
     wushen,
     palaces: [
+      { k: '胎元', v: ec.getTaiYuan(), ny: ec.getTaiYuanNaYin() },
       { k: '命宫', v: ec.getMingGong(), ny: ec.getMingGongNaYin() },
       { k: '身宫', v: ec.getShenGong(), ny: ec.getShenGongNaYin() },
-      { k: '胎元', v: ec.getTaiYuan(), ny: ec.getTaiYuanNaYin() },
       { k: '胎息', v: ec.getTaiXi(), ny: ec.getTaiXiNaYin() },
     ],
-    qiYun: `出生后${yun.getStartYear()}年${yun.getStartMonth()}个月${yun.getStartDay()}天${yun.getStartHour ? yun.getStartHour() + '小时' : ''}起运`,
-    jiaoYun: `${sy.getYear()}年${sy.getMonth()}月${sy.getDay()}日交运（虚岁${sy.getYear() - solarYear + 1}）`,
-    dayKong,
+    qiYun, jiaoYun: jy.text, jiaoYunMeta: jy,
+    renYuan, dayKong, dayLabel,
+    /** 供前端点选大运/流年时拼列（纯数据，无需再调历法库） */
+    mkCol: null as any, // filled in bazi after daYun/liuNian known — actually we attach cols there
   };
+}
+
+/** 给大运/流年附上完整列数据，便于前端切换 */
+function attachCols(pro: any, dayGan: string, yearGan: string, yearZhi: string, monthZhi: string, items: { ganZhi: string; label: string }[]) {
+  const dayKong = pro.dayKong;
+  return items.map((it) => columnOf(dayGan, it.ganZhi, { label: it.label, yearGan, yearZhi, monthZhi, dayKong }));
 }
 
 function proText(pro) {
@@ -162,13 +288,13 @@ function proText(pro) {
   L.push('【专业排盘】');
   L.push(`格局：${pro.geJu.name}（${pro.geJu.note}）；日主${pro.strength.label}（自党力量约${pro.strength.score}%）`);
   L.push(`五神：用神${pro.wushen.用神} 喜神${pro.wushen.喜神 || '-'} 忌神${pro.wushen.忌神 || '-'} 仇神${pro.wushen.仇神 || '-'} 闲神${pro.wushen.闲神 || '-'}`);
-  L.push(`月令：${pro.monthLing}；五行旺衰：${pro.wuXing.map((w) => `${w.wx}${w.state}${w.pct}%`).join(' ')}`);
-  pro.pillars.forEach((p) => L.push(`${p.label}：星运${p.xingYun} 自坐${p.ziZuo} 空亡${p.kongWang} 神煞${p.shenSha.join('、') || '无'}`));
+  L.push(`月令：${pro.monthLing}；人元司令：${pro.renYuan || '-'}；五行旺衰：${pro.wuXing.map((w) => `${w.wx}${w.state}${w.pct}%`).join(' ')}`);
+  pro.pillars.forEach((p) => L.push(`${p.label}：主星${p.zhuXing} 星运${p.xingYun} 自坐${p.ziZuo} 空亡${p.kongWang} 旬首${p.xunShou || ''} 神煞${(p.shenSha || []).join('、') || '无'}`));
   L.push(`天干关系：${pro.relations.gan.join('；') || '无'}`);
   L.push(`地支关系：${pro.relations.zhi.join('；') || '无'}`);
-  L.push(`宫位：${pro.palaces.map((x) => `${x.k}${x.v}(${x.ny})`).join(' ')}`);
-  L.push(`${pro.qiYun}，${pro.jiaoYun}`);
+  L.push(`宫位：${pro.palaces.filter((x) => x.k !== '胎息').map((x) => `${x.k}${x.v}(${x.ny})`).join(' ')}`);
+  L.push(`起运：${pro.qiYun}；${pro.jiaoYun}`);
   return L.join('\n');
 }
 
-export { buildPro, proText, changSheng, GAN_HE, GAN_CHONG, LIU_HE, SAN_HE, LIU_CHONG, HAI, PO, XING3, pairHas, pairKey };
+export { buildPro, proText, changSheng, columnOf, attachCols, renYuanSiLing, GAN_HE, GAN_CHONG, LIU_HE, SAN_HE, LIU_CHONG, HAI, PO, XING3, pairHas, pairKey };
