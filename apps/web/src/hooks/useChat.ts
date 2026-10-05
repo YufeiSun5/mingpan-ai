@@ -1,6 +1,6 @@
 // 聊天数据逻辑（与展示组件分离，便于小程序 Taro 复用同一套 core）
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { addUser, applyEvent, createClient, freshState, migrateState, FRIENDLY_ERROR, type ChatState, type ApiError } from '@mingpan/core';
+import { addUser, applyEvent, createClient, freshState, migrateState, profileConfirmed, FRIENDLY_ERROR, type ChatState, type ApiError, type Profile } from '@mingpan/core';
 import { webTransport } from '../transport';
 
 const KEY = 'mingpan-chat-v2', OLD_KEY = 'mingpan-chat-v1', TOKEN = 'mingpan-token', MIGRATED = 'mingpan-migrated';
@@ -45,7 +45,7 @@ export function useChat() {
     if (text) update((s) => addUser(s, text));
     const s = ref.current;
     try {
-      await client.chat({ cid: s.cid, messages: s.llm.slice(-16), pending: s.pending, profile: s.profile, action, nowYear: new Date().getFullYear() }, (e) => update((st) => applyEvent(st, e)));
+      await client.chat({ cid: s.cid, messages: s.llm.slice(-16), pending: s.pending, profile: s.profile, action, nowYear: new Date().getFullYear(), ui: 'card' }, (e) => update((st) => applyEvent(st, e)));
     } catch (e) {
       const err = e as ApiError;
       update((st) => applyEvent(st, ['error', { error: err.server ? `${err.message}，请稍后再试` : FRIENDLY_ERROR }]));
@@ -55,6 +55,41 @@ export function useChat() {
     }
   }, [busy, update]);
 
-  const reset = useCallback(() => update(() => freshState()), [update]);
-  return { state, busy, send, reset };
+  const ensureToken = async () => { if (!ls.get(TOKEN)) { const r = await client.session(); ls.set(TOKEN, r.token); } };
+  const fail = (e: unknown) => {
+    const err = e as ApiError;
+    update((st) => applyEvent(st, ['error', { error: err.server ? `${err.message}` : FRIENDLY_ERROR }]));
+    return err;
+  };
+
+  /**
+   * 确认生辰 / 修改生辰：走 POST（新建）或 PATCH（修改）/api/v1/profiles，再请求 /api/v1/profiles/:id/reading 流式详批。
+   * 这是软件操作，不产生用户气泡；服务端会记一条 system 事件供模型上下文使用。
+   * 校验失败时抛出错误信息（由卡片就地显示），不进对话。
+   */
+  const confirmProfile = useCallback(async (profile: Profile, id?: string): Promise<string | null> => {
+    if (busy) return null;
+    setBusy(true);
+    const nowYear = new Date().getFullYear();
+    try {
+      await ensureToken();
+      const s = ref.current;
+      let r;
+      try { r = id ? await client.updateProfile(id, profile, s.cid, nowYear) : await client.createProfile(profile, s.cid, nowYear); }
+      catch (e) { const err = e as ApiError; if (err.status === 422 || err.status === 400) return err.message; fail(e); return null; }
+      update((st) => profileConfirmed(st, r));
+      try { await client.reading(r.profile.id, { cid: s.cid, nowYear, messages: ref.current.llm.filter((m) => m.role === 'user').slice(-3) }, (e) => update((st) => applyEvent(st, e))); }
+      catch (e) { fail(e); }
+      return null;
+    } catch (e) { fail(e); return null; }
+    finally { update((st) => applyEvent(st, ['done', {}])); setBusy(false); }
+  }, [busy, update]);
+
+  /** 新排盘：服务端新建对话，拿到新的 cid（离线时退回本地生成） */
+  const reset = useCallback(async () => {
+    let cid: string | null = null;
+    try { await ensureToken(); cid = (await client.newConversation()).cid; } catch { /* 离线 */ }
+    update(() => { const f = freshState(); if (cid) f.cid = cid; return f; });
+  }, [update]);
+  return { state, busy, send, reset, confirmProfile };
 }

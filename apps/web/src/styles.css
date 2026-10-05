@@ -138,7 +138,6 @@ button,input,textarea{font-family:inherit}
 .quick button{flex:none;border:.5px solid var(--line2);background:var(--surface);color:var(--ink);font-size:13.5px;border-radius:999px;padding:8px 15px;white-space:nowrap;box-shadow:0 2px 8px -4px rgba(30,20,10,.12);animation:rise .4s both;transition:transform .15s}
 .quick button:nth-child(2){animation-delay:.05s}.quick button:nth-child(3){animation-delay:.1s}.quick button:nth-child(4){animation-delay:.15s}
 .quick button:active{transform:scale(.96)}
-.quick button.primary{background:var(--zhu);border-color:var(--zhu);color:#fff}
 
 /* 输入区 */
 .composer{position:relative;z-index:3;flex:none;display:flex;align-items:flex-end;gap:10px;padding:10px 16px 8px;padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right));background:rgba(246,243,237,.9);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);border-top:.5px solid var(--line2)}
@@ -227,3 +226,35 @@ button,input,textarea{font-family:inherit}
   .foot{display:none}
   .composer{padding-top:6px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
 }
+
+/* 生辰确认卡片 */
+.cf-card{max-width:min(calc(100% - 44px),400px);padding:15px 16px 14px;border-top:2px solid var(--zhu)}
+.cf-card.is-done{padding:9px 12px;border-top:0;border-radius:6px 16px 16px 16px;background:var(--surface2);box-shadow:none;border:.5px solid var(--line2)}
+.cf-h{display:flex;align-items:baseline;gap:8px;font-family:var(--display);font-size:16px;font-weight:700;letter-spacing:2px;margin-bottom:10px}
+.cf-h span{font-family:var(--sans);font-weight:400;letter-spacing:0;font-size:11.5px;color:var(--ink3)}
+.cf-kv{display:grid;grid-template-columns:52px 1fr;gap:7px 10px;margin:0 0 12px;font-size:14.5px}
+.cf-kv dt{color:var(--ink3);font-size:12.5px;letter-spacing:1px;padding-top:2px}
+.cf-kv dd{margin:0;color:var(--ink);word-break:break-word}.cf-kv em{font-style:normal;color:var(--ink4);font-size:13px}
+.cf-act{display:flex;gap:8px;margin-top:4px}
+.cf-act button{border-radius:999px;font-size:14px;padding:9px 18px;border:.5px solid var(--line2);background:var(--surface);color:var(--ink2);transition:transform .15s,opacity .2s}
+.cf-act button:active{transform:scale(.97)}.cf-act button:disabled{opacity:.5}
+.cf-act .primary{flex:1;background:var(--zhu);border-color:var(--zhu);color:#fff;font-weight:600;letter-spacing:2px;box-shadow:0 6px 16px -8px rgba(178,58,48,.6)}
+.cf-err{margin:0 0 10px;font-size:12.5px;color:var(--bad);background:var(--zhu-soft);border-radius:8px;padding:6px 10px}
+.cf-f{display:grid;grid-template-columns:52px 1fr;align-items:center;gap:10px;margin:0 0 11px}
+.cf-f>label{font-size:12.5px;color:var(--ink3);letter-spacing:1px}
+.cf-in{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}.cf-in.col{flex-direction:column;align-items:stretch}
+.cf-in.date{gap:4px;flex-wrap:nowrap}.cf-in.date span{font-size:13px;color:var(--ink3)}
+.cf input:not([type=checkbox]),.cf select{font:inherit;font-size:15px;color:var(--ink);background:var(--surface2);border:.5px solid var(--line2);border-radius:9px;padding:6px 8px;min-width:0;outline:none}
+.cf input:focus,.cf select:focus{border-color:var(--jin);box-shadow:0 0 0 3px var(--jin-soft)}
+.cf-in.date input{width:3.2em;text-align:center}.cf-in.date input:first-child{width:4.2em}
+.cf-in.date select{flex:1 1 0}
+.cf input.city{flex:1;width:100%}
+.seg{display:inline-flex;background:var(--surface2);border:.5px solid var(--line2);border-radius:10px;padding:2px}
+.seg button{border:0;background:none;color:var(--ink2);font-size:13.5px;padding:5px 13px;border-radius:8px;transition:background .2s,color .2s}
+.seg button.on{background:var(--surface);color:var(--zhu);font-weight:600;box-shadow:0 1px 4px rgba(30,20,10,.12)}
+.chk{display:inline-flex;align-items:center;gap:5px;font-size:13.5px;color:var(--ink2)}.chk input{accent-color:var(--zhu);width:16px;height:16px;margin:0}
+.cf.done{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--ink2);line-height:1.5}
+.cf.done .ok{flex:none;display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:var(--good);color:#fff;font-size:11px}
+.cf-line{flex:1;min-width:0}.cf-line b{color:var(--ink);font-weight:600;margin-right:6px}
+.cf .link{flex:none;border:0;background:none;color:var(--zhu);font-size:12.5px;padding:2px 4px}.cf .link:disabled{opacity:.4}
+@media (max-width:360px){.cf-card{padding:13px 12px}.cf-f,.cf-kv{grid-template-columns:44px 1fr}.seg button{padding:5px 9px}}

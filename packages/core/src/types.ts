@@ -4,7 +4,7 @@ export type Wx = '木' | '火' | '土' | '金' | '水';
 export interface BirthTime { type: 'exact' | 'shichen' | 'unknown'; hour?: number; minute?: number; shichen?: string }
 export interface Profile {
   name?: string; gender?: Gender; calendar?: 'solar' | 'lunar'; year?: number; month?: number; day?: number; leap?: boolean;
-  time?: BirthTime; city?: string; topics?: string[]; question?: string; awaitingConfirm?: boolean;
+  time?: BirthTime; city?: string; topics?: string[]; question?: string; awaitingConfirm?: boolean; id?: string;
 }
 export interface Pillar {
   label: string; gan: string; zhi: string; ganWx: Wx; zhiWx: Wx; shiShenGan: string; shiShenZhi: string[];
@@ -43,8 +43,10 @@ export type ChatEvent =
   | ['crisis', Record<string, never>] | ['ping', Record<string, never>] | ['done', { source?: string }];
 export type ChatEventName = ChatEvent[0];
 
-export interface ChatRequest { cid?: string; messages: LlmMessage[]; pending: Profile | null; profile: Profile | null; action?: 'confirm'; nowYear?: number }
+export interface ChatRequest { cid?: string; messages: LlmMessage[]; pending: Profile | null; profile: Profile | null; action?: 'confirm'; nowYear?: number; ui?: 'card' | 'text' }
 
 export type ChatItem =
   | { type: 'user'; text: string } | { type: 'bot'; text: string }
-  | { type: 'chart'; chart: Chart };
+  | { type: 'chart'; chart: Chart }
+  /** 生辰确认卡片：editing＝待确认（可编辑），confirmed＝已确认（折叠为摘要） */
+  | { type: 'confirm'; profile: Profile; status: 'editing' | 'confirmed'; id?: string };

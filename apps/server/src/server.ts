@@ -5,13 +5,13 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { handleReading, handleChart } from './handler';
-import { handleChat } from './chat';
+import { handleChat, runReading, validateProfile, profileLine, readingIntro, sanitize } from './chat';
 import { getProvider } from './llm';
 import * as rateLimit from './ratelimit';
 import { securityHeaders } from './security';
 import { getStore } from './store';
 import { identify, makeToken, newUid, setCookie, clearCookie, isAdmin, verifyToken } from './identity';
-import { memoryContext, recordTurn, enforceBudget } from './memory';
+import { memoryContext, recordTurn, enforceBudget, recordProfileEvent } from './memory';
 
 const app = express();
 app.disable('x-powered-by');
@@ -100,16 +100,16 @@ async function runChat(req: Request, emit: Emit) {
   }
 }
 
-// 轮询模式（小程序不支持流式时）：POST ?mode=poll 返回 jobId，GET /api/v1/chat/jobs/:id?after=n 拉取增量事件
+// 事件流通用执行器：SSE（默认）| ?stream=0 一次性 JSON | ?mode=poll 轮询（小程序 wx.request 不支持流式时）
 const jobs = new Map<string, { events: [string, any][]; done: boolean; at: number }>();
 setInterval(() => { const t = Date.now(); for (const [k, v] of jobs) if (t - v.at > 600000) jobs.delete(k); }, 60000).unref();
 
-async function chatRoute(req: Request, res: Response) {
-  const t0 = Date.now(), tag = `[chat] ${req.ip} ${req.body?.action || (req.body?.profile ? 'followup' : 'extract')}`;
+async function eventRoute(req: Request, res: Response, tag: string, run: (emit: Emit) => Promise<void>) {
+  const t0 = Date.now();
   const mode = req.query.stream === '0' ? 'json' : req.query.mode === 'poll' ? 'poll' : 'sse';
   if (mode === 'json') {
     const events: [string, any][] = [];
-    await runChat(req, (e, d) => events.push([e, d]));
+    await run((e, d) => events.push([e, d]));
     console.log(`${tag} json ${Date.now() - t0}ms events=${events.length}`);
     return res.set('Cache-Control', 'no-store').json({ events });
   }
@@ -117,7 +117,7 @@ async function chatRoute(req: Request, res: Response) {
     const id = crypto.randomBytes(9).toString('base64url');
     const job = { events: [] as [string, any][], done: false, at: Date.now() };
     jobs.set(id, job);
-    runChat(req, (e, d) => { if (e !== 'ping') job.events.push([e, d]); }).finally(() => { job.done = true; console.log(`${tag} poll ${Date.now() - t0}ms events=${job.events.length}`); });
+    run((e, d) => { if (e !== 'ping') job.events.push([e, d]); }).finally(() => { job.done = true; console.log(`${tag} poll ${Date.now() - t0}ms events=${job.events.length}`); });
     return res.json({ jobId: id });
   }
   res.set({ 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' });
@@ -125,15 +125,69 @@ async function chatRoute(req: Request, res: Response) {
   res.write(': ok\n\n'); // 立即首字节，避免移动网络 / 内置浏览器判定超时
   let closed = false, n = 0; res.on('close', () => (closed = true));
   const ping = setInterval(() => { if (!closed) res.write(': ping\n\n'); }, 5000);
-  try { await runChat(req, (e, d) => { if (!closed) { n++; res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`); } }); }
+  try { await run((e, d) => { if (!closed) { n++; res.write(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`); } }); }
   finally { clearInterval(ping); console.log(`${tag} sse ${Date.now() - t0}ms events=${n}${closed ? ' CLIENT_CLOSED_EARLY' : ''}`); res.end(); }
 }
+const chatRoute = (req: Request, res: Response) => eventRoute(req, res, `[chat] ${req.ip} ${req.body?.action || (req.body?.profile ? 'followup' : 'extract')}`, (emit) => runChat(req, emit));
 app.post('/api/v1/chat', smallJson, limited, chatRoute);
 app.post('/api/chat', smallJson, limited, chatRoute); // 兼容旧前端缓存
-app.get('/api/v1/chat/jobs/:id', (req, res) => {
+app.get(['/api/v1/jobs/:id', '/api/v1/chat/jobs/:id'], (req, res) => {
   const job = jobs.get(String(req.params.id)); if (!job) return res.status(404).json({ error: '任务不存在或已过期' });
   const after = Math.max(0, +(req.query.after || 0) || 0);
   res.set('Cache-Control', 'no-store').json({ events: job.events.slice(after), next: job.events.length, done: job.done });
+});
+
+// ---------- 对话 / 生辰档案（确认排盘是软件操作，不是聊天消息） ----------
+const optCid = (v: any) => (typeof v === 'string' && CID_RE.test(v) ? v : null);
+const nowYearOf = (b: any) => (+b?.nowYear >= 1900 && +b?.nowYear <= 2200 ? +b.nowYear : new Date().getFullYear());
+const birthKey = (p: any) => [p.gender, p.calendar, p.year, p.month, p.day, p.leap ? 1 : 0, JSON.stringify(p.time || null), p.city || ''].join('|');
+
+app.post('/api/v1/conversations', limited, wrap(async (req) => {
+  const uid = needUser(req); await store.ensureUser(uid);
+  const cid = crypto.randomBytes(12).toString('base64url');
+  await store.ensureConversation(uid, cid);
+  return { cid };
+}));
+app.get('/api/v1/profiles', wrap(async (req) => ({ profiles: await store.getProfiles(needUser(req)) })));
+app.post('/api/v1/profiles', smallJson, limited, wrap(async (req, res) => {
+  const uid = needUser(req); await store.ensureUser(uid);
+  const v = validateProfile(req.body?.profile, nowYearOf(req.body));
+  if (v.error) { res.status(422); return { error: v.error }; }
+  const id = await store.saveProfile(uid, birthKey(v.profile), v.profile, v.chart);
+  await recordProfileEvent(uid, optCid(req.body?.cid), v.profile, v.chart, `用户确认了生辰信息：${profileLine(v.profile)}`);
+  console.log(`[profile] create ${uid} ${id}`);
+  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart) };
+}));
+app.patch('/api/v1/profiles/:id', smallJson, limited, wrap(async (req, res) => {
+  const uid = needUser(req);
+  const cur = await store.getProfile(uid, String(req.params.id));
+  if (!cur) { res.status(404); return { error: '档案不存在' }; }
+  const patch = req.body?.profile || {};
+  const v = validateProfile({ ...cur.data, ...patch, time: patch.time || cur.data.time }, nowYearOf(req.body));
+  if (v.error) { res.status(422); return { error: v.error }; }
+  const id = await store.updateProfile(uid, cur.id, birthKey(v.profile), v.profile, v.chart);
+  await recordProfileEvent(uid, optCid(req.body?.cid), v.profile, v.chart, `用户修改并确认了生辰信息：${profileLine(v.profile)}`);
+  console.log(`[profile] update ${uid} ${id}`);
+  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart) };
+}));
+// 详批：SSE / ?stream=0 / ?mode=poll
+app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) => {
+  const uid = identify(req);
+  if (!uid) return res.status(401).json({ error: '未登录或身份已失效' });
+  const p = await store.getProfile(uid, String(req.params.id)).catch(() => null);
+  if (!p) return res.status(404).json({ error: '档案不存在' });
+  const cid = optCid(req.body?.cid);
+  const v = validateProfile(p.data, nowYearOf(req.body)); // 按当前年份重新排盘（流年随年份变化）
+  if (v.error) return res.status(422).json({ error: v.error });
+  const { messages } = sanitize(req.body || {});
+  const memory = cid ? await memoryContext(uid, cid).catch(() => '') : '';
+  await eventRoute(req, res, `[reading] ${req.ip}`, async (emit) => {
+    let text = '', score = null;
+    const tap: Emit = (e, d) => { if (e === 'delta') text += d.text; emit(e, d); };
+    try { await runReading(v.profile, v.chart, messages, tap, { memory, onScore: (sc) => { score = sc; console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`); } }); }
+    catch (e) { console.error(e); emit('error', { error: '大师走神了，请再试一次～' }); emit('done', {}); }
+    if (cid && text) recordTurn(uid, cid, { assistant: text, score }).catch((e) => console.error('[memory] record', e.message));
+  });
 });
 
 // ---------- 我的数据 ----------

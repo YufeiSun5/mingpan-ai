@@ -1,5 +1,5 @@
 // 聊天状态机（纯函数，无 DOM）：Web 与小程序共用
-import type { ChatEvent, ChatItem, LlmMessage, Profile } from './types';
+import type { Chart, ChatEvent, ChatItem, LlmMessage, Profile } from './types';
 
 export interface ChatState { v: 2; cid: string; items: ChatItem[]; llm: LlmMessage[]; pending: Profile | null; profile: Profile | null; quick: string[]; stream: string | null }
 export const newCid = () => Array.from({ length: 16 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('');
@@ -24,19 +24,35 @@ export function applyEvent(s0: ChatState, [ev, d]: ChatEvent): ChatState {
     case 'bubble': return s;
     case 'text': return { ...s, items: [...s.items, { type: 'bot', text: d.text }], llm: [...s.llm, { role: 'assistant', content: d.text }] };
     case 'chart': return { ...s, items: [...s.items, { type: 'chart', chart: d.chart }] };
-    case 'pending': return { ...s, pending: d.pending };
+    case 'pending': {
+      if (!d.pending?.awaitingConfirm) return { ...s, pending: d.pending };
+      // 待确认：在大师这一轮里放一张可编辑卡片（替换掉之前未确认的卡片）
+      const items = s.items.filter((x) => !(x.type === 'confirm' && x.status === 'editing'));
+      return { ...s, pending: d.pending, quick: [], items: [...items, { type: 'confirm', profile: d.pending, status: 'editing' }] };
+    }
     case 'profile': return { ...s, profile: d.profile, pending: null };
     case 'quick': return { ...s, quick: d.replies || [] };
     case 'error': return { ...s, items: [...s.items, { type: 'bot', text: d.error }] };
     default: return s;
   }
 }
+/** 生辰已确认（POST/PATCH /api/v1/profiles 返回后）：卡片折叠为摘要，插入开场白与命盘。不产生用户气泡。 */
+export function profileConfirmed(s0: ChatState, r: { profile: Profile & { id: string }; chart: Chart; intro: string }): ChatState {
+  const s = endStream(s0);
+  let idx = -1;
+  s.items.forEach((x, i) => { if (x.type === 'confirm' && (x.status === 'editing' || x.id === r.profile.id)) idx = i; });
+  const card: ChatItem = { type: 'confirm', profile: r.profile, status: 'confirmed', id: r.profile.id };
+  const items = s.items.slice();
+  if (idx >= 0) items[idx] = card; else items.push(card);
+  return { ...s, quick: [], pending: null, profile: r.profile, items: [...items, { type: 'bot', text: r.intro }, { type: 'chart', chart: r.chart }], llm: [...s.llm, { role: 'assistant', content: r.intro }] };
+}
+
 /** 从 v1（旧版 localStorage）迁移 */
 export function migrateState(raw: any): ChatState {
   if (!raw || typeof raw !== 'object') return freshState();
   const s = freshState();
   if (raw.cid) s.cid = String(raw.cid);
-  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart'].includes(x.type)  /* 旧版评分卡不再展示 */) : [];
+  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart', 'confirm'].includes(x.type)  /* 旧版评分卡不再展示 */) : [];
   s.llm = Array.isArray(raw.llm) ? raw.llm.filter((m: any) => m && typeof m.content === 'string') : [];
   s.pending = raw.pending || null; s.profile = raw.profile || null; s.quick = Array.isArray(raw.quick) ? raw.quick : [];
   return s;

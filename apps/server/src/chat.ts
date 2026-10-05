@@ -1,6 +1,6 @@
 // 聊天式流程：提取出生信息 → 确认 → 排盘 → 流式详批 → 追问对答
 // handleChat(body, emit) 与平台无关：emit(event, data) 由 Express(SSE) 或云函数(收集为数组) 实现。
-import { computeChart } from '@mingpan/core';
+import { computeChart, checkDate } from '@mingpan/core';
 import { buildReadingMessages, chartToText, readTemplate, fill, loadStyle } from './prompt';
 import { generateFallback } from '@mingpan/core';
 import { chat, chatStream, getProvider, getLastUsage } from './llm';
@@ -14,7 +14,7 @@ function sanitize(body): any {
   const messages = (Array.isArray(body.messages) ? body.messages : [])
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
     .slice(-20).map((m) => ({ role: m.role, content: m.content.slice(0, m.role === 'user' ? 500 : 4000) }));
-  return { messages, pending: cleanProfile(body.pending), profile: cleanProfile(body.profile), action: body.action, nowYear: +body.nowYear || undefined };
+  return { messages, pending: cleanProfile(body.pending), profile: cleanProfile(body.profile), action: body.action, nowYear: +body.nowYear || undefined, ui: body.ui === 'card' ? 'card' : 'text' };
 }
 function cleanProfile(p): any {
   if (!p || typeof p !== 'object') return null;
@@ -223,7 +223,7 @@ function followUpFallback(chart, q) {
 }
 
 async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any) => void } = {}) {
-  const { messages, pending, profile, action, nowYear: ny } = sanitize(body || {});
+  const { messages, pending, profile, action, nowYear: ny, ui } = sanitize(body || {});
   const nowYear = ny || new Date().getFullYear();
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
 
@@ -283,30 +283,77 @@ async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any)
       emit('done', {});
       return;
     } else {
-      try { computeChart({ ...toInput(merged), nowYear }); } catch (e) {
+      let bad = checkDate(merged);
+      if (!bad) { try { computeChart({ ...toInput(merged), nowYear }); } catch { bad = `${merged.calendar === 'lunar' ? '农历' : '公历'}${merged.year}年${merged.month}月好像没有${merged.day}日这一天`; } }
+      if (bad) {
         emit('pending', { pending: { ...merged, day: undefined, awaitingConfirm: false } });
-        emit('text', { text: `嗯…${merged.calendar === 'lunar' ? '农历' : '公历'}${merged.year}年${merged.month}月好像没有${merged.day}日这一天，再帮我核对一下日期好吗？` });
+        emit('text', { text: `嗯…${bad.replace(/，请再核对一下$/, '')}，再帮我核对一下日期好吗？` });
         emit('done', {}); return;
       }
       merged.awaitingConfirm = true;
-      emit('pending', { pending: merged });
-      emit('text', { text: summary(merged) });
-      emit('quick', { replies: ['对，开始排盘', '我要修改'] });
+      if (ui === 'card') { // 新前端：信息整理成可编辑的确认卡片，由「开始排盘」按钮走 /api/v1/profiles
+        emit('text', { text: CARD_LINES[Math.floor(Math.random() * CARD_LINES.length)] });
+        emit('pending', { pending: merged });
+      } else {
+        emit('pending', { pending: merged });
+        emit('text', { text: summary(merged) });
+        emit('quick', { replies: ['对，开始排盘', '我要修改'] });
+      }
       emit('done', {});
       return;
     }
   }
 
-  // 排盘
+  // 排盘（旧版前端：文字确认后直接在这里排盘）
   const prof = { ...target }; delete prof.awaitingConfirm;
   const chart = computeChart({ ...toInput(prof), nowYear });
   emit('profile', { profile: prof });
-  const ts = chart.trueSolar;
-  emit('text', { text: `好了，${prof.name ? prof.name + '，' : ''}你的盘排出来了，你先看看${ts ? `\n（按${ts.city}真太阳时校正：${ts.time.slice(11, 16)}，${chart.lunar.split(' ').pop()}）` : ''}` });
+  emit('text', { text: readingIntro(prof, chart) });
   emit('chart', { chart });
+  await runReading(prof, chart, messages, emit, ctx);
+}
+
+const CARD_LINES = [
+  '好，我把你说的整理成一张卡片了，你核对一下。没问题就点「开始排盘」，哪里不对直接在卡片上改就行。',
+  '嗯，信息差不多齐了。我列在下面这张卡片里，你看看对不对，对的话点「开始排盘」。',
+  '行，我先帮你理一下，你过一眼——有不对的地方点「修改」，确认无误就开始排盘。',
+];
+
+/** 排盘后的第一句话（含真太阳时校正说明） */
+function readingIntro(prof, chart) {
+  const ts = chart.trueSolar;
+  return `好了，${prof.name ? prof.name + '，' : ''}你的盘排出来了，你先看看${ts ? `\n（按${ts.city}真太阳时校正：${ts.time.slice(11, 16)}，${chart.lunar.split(' ').pop()}）` : ''}`;
+}
+
+/** 一行生辰摘要（用于系统事件 / 记忆） */
+function profileLine(p) {
+  const date = p.calendar === 'lunar' ? `农历${p.year}年${p.leap ? '闰' : ''}${CN_M[p.month - 1]}月${CN_D[p.day - 1] || p.day + '日'}` : `公历${p.year}年${p.month}月${p.day}日`;
+  const time = p.time?.type === 'exact' ? `${String(p.time.hour).padStart(2, '0')}:${String(p.time.minute).padStart(2, '0')}` : p.time?.type === 'shichen' ? `${p.time.shichen}时` : '时辰不详';
+  return `${p.gender}，${date} ${time}${p.city ? `，${p.city}` : ''}${p.topics?.length ? `，想问${p.topics.join('、')}` : ''}`;
+}
+
+/** 校验并排盘：返回规范化的生辰与命盘，或错误信息 */
+function validateProfile(raw, nowYear) {
+  const p = cleanProfile(raw);
+  if (!p) return { error: '缺少生辰信息' };
+  delete p.awaitingConfirm;
+  if (!p.calendar) p.calendar = 'solar';
+  if (!p.time) p.time = { type: 'unknown' };
+  const miss = missingOf(p);
+  if (miss.length) return { error: `还缺${miss.join('、')}` };
+  if (p.year < 1900 || p.year > 2100) return { error: '出生年份需要在 1900–2100 之间' };
+  const bad = checkDate(p);
+  if (bad) return { error: bad };
+  try { return { profile: p, chart: computeChart({ ...toInput(p), nowYear }) }; }
+  catch { return { error: `${p.calendar === 'lunar' ? '农历' : '公历'}${p.year}年${p.leap ? '闰' : ''}${p.month}月没有${p.day}日，请再核对一下${p.leap ? '（这一年可能没有这个闰月）' : ''}` }; }
+}
+
+/** 详批：评分（仅服务端）→ 分节并行流式 → 收尾 + 推荐追问 */
+async function runReading(prof, chart, messages, emit, ctx: { memory?: string; onScore?: (s: any) => void } = {}) {
+  const nowYear = chart.nowYear;
   emit('bubble', {});
   const questions = { topics: prof.topics || [], text: prof.question || '' };
-  const qText = [prof.question || '', ...messages.filter((m) => m.role === 'user').slice(-3).map((m) => m.content)].join(' ');
+  const qText = [prof.question || '', ...(messages || []).filter((m) => m.role === 'user').slice(-3).map((m) => m.content)].join(' ');
   const scoreCtx = SC.scorePrompt(chart, nowYear, qText, prof.topics?.length ? SC.pickDims(prof.topics.join(' ') + qText) : SC.pickDims(qText));
   const rm = buildReadingMessages(chart, questions, { SCORE_CONTEXT: scoreCtx.text });
   if (ctx.memory) rm[0].content += `\n\n${ctx.memory}`;
@@ -314,6 +361,7 @@ async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any)
   emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，直接问我就行。' });
   emit('quick', { replies: suggestions(chart) });
   emit('done', { source: r.source });
+  return r;
 }
 
-export { handleChat };
+export { handleChat, runReading, validateProfile, profileLine, readingIntro, sanitize };

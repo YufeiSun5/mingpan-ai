@@ -1,5 +1,5 @@
 // 确定性排盘：基于 6tail 的 lunar-javascript
-import { Solar, Lunar, LunarYear } from 'lunar-javascript';
+import { Solar, Lunar, LunarYear, LunarMonth } from 'lunar-javascript';
 import CITIES from './cities';
 import { buildPro } from './pro';
 
@@ -196,4 +196,17 @@ function relationsWith(zhi, pillars, timeUnknown) {
   return out;
 }
 
-export { computeChart, shiShenOf, LUCK };
+/** 校验日期是否真实存在（公历月份天数 / 农历大小月 / 闰月是否存在），返回错误文案或 null */
+function checkDate({ calendar = 'solar', year, month, day, leap = false }: { calendar?: string; year: number; month: number; day: number; leap?: boolean }): string | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day) || month < 1 || month > 12 || day < 1) return '日期不对，请再核对一下';
+  if (calendar === 'lunar') {
+    const lm = LunarMonth.fromYm(year, leap ? -month : month);
+    if (!lm) return leap ? `农历${year}年没有闰${month}月，请再核对一下` : '日期不对，请再核对一下';
+    if (day > lm.getDayCount()) return `农历${year}年${leap ? '闰' : ''}${month}月只有${lm.getDayCount()}天，请再核对一下`;
+    return null;
+  }
+  const dim = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day > dim ? `公历${year}年${month}月只有${dim}天，请再核对一下` : null;
+}
+
+export { computeChart, shiShenOf, LUCK, checkDate };

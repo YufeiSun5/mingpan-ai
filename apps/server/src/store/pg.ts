@@ -60,6 +60,14 @@ export function createPgStore(url: string): Store {
       return id;
     },
     async getProfiles(uid) { return (await q('select id, data, updated_at from profiles where user_id=$1 order by updated_at desc', [uid])).rows.map((r) => ({ id: r.id, data: r.data, updatedAt: r.updated_at.toISOString() })); },
+    async getProfile(uid, id) { const r = (await q('select id, data, chart from profiles where user_id=$1 and id=$2', [uid, id])).rows[0]; return r || null; },
+    async updateProfile(uid, id, birthKey, data, chart) {
+      // 改成与已有档案相同的生辰：直接合并到那份档案，删掉当前这份
+      const dup = (await q('select id from profiles where user_id=$1 and birth_key=$2 and id<>$3', [uid, birthKey, id])).rows[0];
+      if (dup) { await q('delete from profiles where user_id=$1 and id=$2', [uid, id]); await q('update profiles set data=$3, chart=$4, updated_at=now() where user_id=$1 and id=$2', [uid, dup.id, data, chart]); return dup.id; }
+      await q('update profiles set birth_key=$3, data=$4, chart=$5, updated_at=now() where user_id=$1 and id=$2', [uid, id, birthKey, data, chart]);
+      return id;
+    },
     async ensureConversation(uid, cid) { await q(`insert into conversations(user_id, id) values ($1,$2) on conflict (user_id, id) do update set updated_at=now()`, [uid, cid]); },
     async hasConversation(uid, cid) { return (await q('select 1 from conversations where user_id=$1 and id=$2', [uid, cid])).rowCount > 0; },
     async appendMessages(uid, cid, msgs) {

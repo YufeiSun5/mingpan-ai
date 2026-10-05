@@ -62,9 +62,14 @@ npm test                 # 排盘自测
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/chat` | SSE 流式。请求 `{ cid, messages, pending, profile, action, nowYear }`；事件 `text/delta/bubble/chart/score/pending/profile/quick/crisis/error/done` |
+| POST | `/api/v1/chat` | SSE 流式。请求 `{ cid, messages, pending, profile, nowYear, ui }`（`ui:'card'` 时信息齐全只返回 `pending`，由前端确认卡片调用 `/api/v1/profiles`）；事件 `text/delta/bubble/chart/pending/profile/quick/crisis/error/done` |
 | POST | `/api/v1/chat?stream=0` | 非流式：一次返回 `{ events: [[event, data], …] }` |
-| POST | `/api/v1/chat?mode=poll` → GET `/api/v1/chat/jobs/:id?after=n` | 轮询模式（小程序 `wx.request` 不支持流式时）：返回增量事件、`next`、`done` |
+| POST | `/api/v1/chat?mode=poll` → GET `/api/v1/jobs/:id?after=n`（别名 `/api/v1/chat/jobs/:id`） | 轮询模式（小程序 `wx.request` 不支持流式时）：返回增量事件、`next`、`done` |
+| POST | `/api/v1/conversations` | 新排盘：新建对话，返回 `{ cid }` |
+| GET | `/api/v1/profiles` | 我的生辰档案列表 |
+| POST | `/api/v1/profiles` | 确认生辰（软件操作，不是聊天消息）：`{ profile, cid, nowYear }` → 校验（含大小月 / 闰月）+ 排盘 + 存档 → `{ profile:{…,id}, chart, intro }`；校验失败 422 `{ error }`。服务端在对话记忆里记一条 system 事件「用户确认了生辰信息：…」 |
+| PATCH | `/api/v1/profiles/:id` | 修改生辰并重新排盘，同上（事件「用户修改并确认了生辰信息：…」） |
+| POST | `/api/v1/profiles/:id/reading` | 详批流式：`{ cid, nowYear, messages }`；SSE / `?stream=0` / `?mode=poll`，事件同 chat |
 | POST | `/api/v1/auth/wechat` | 小程序登录占位：`{ code }` → code2session → 绑定用户（需 `WECHAT_APPID/SECRET`） |
 | GET / DELETE | `/api/v1/me` | 我的数据概览 / 删除我的全部数据 |
 | GET | `/api/v1/me/export` | 下载我的全部数据（JSON） |

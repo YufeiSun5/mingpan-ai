@@ -45,6 +45,19 @@ export async function recordTurn(uid: string, cid: string, turn: { user?: string
   compress(uid, cid).catch((e) => console.error('[memory] compress', e.message));
 }
 
+/** 生辰确认 / 修改：记一条 system 类型事件（供模型上下文，不是用户消息），并更新结构化事实 */
+export async function recordProfileEvent(uid: string, cid: string | null, profile: any, chart: any, text: string) {
+  const store = getStore();
+  if (cid) await store.appendMessages(uid, cid, [{ role: 'system', content: text, tokens: estTokens(text), meta: { event: 'profile' } }]);
+  const m = await store.getMemory(uid);
+  const f = m.facts || (m.facts = {});
+  f.birth = profile;
+  const c = chart;
+  f.chartSummary = `${c.pillars.map((p: any) => p.gan + p.zhi).join(' ')}；${c.input.gender}；日主${c.dayMaster.gan}${c.dayMaster.wuXing}${c.dayMaster.strength}；${c.pro?.geJu?.name || ''}；喜用${c.xiYong.join('')} 忌${c.jiShen.join('')}`;
+  m.tokens = memTokens(m);
+  await store.saveMemory(uid, m);
+}
+
 async function llmJSON(system: string, user: string, maxTokens = 900): Promise<any> {
   if (!getProvider().available) return null;
   const out = await chat([{ role: 'system', content: system }, { role: 'user', content: user }], { json: true, temperature: 0.2, maxTokens });
@@ -64,7 +77,7 @@ export async function compress(uid: string, cid: string, force = false) {
     const rawTok = raw.reduce((a, b) => a + b.tokens, 0);
     if ((rawTok > CONV_RAW_LIMIT || force) && raw.length > KEEP_RECENT) {
       const old = raw.slice(0, raw.length - KEEP_RECENT);
-      const dialog = old.map((x) => `${x.role === 'user' ? '客户' : '大师'}：${x.content.slice(0, 1500)}`).join('\n');
+      const dialog = old.map((x) => `${x.role === 'user' ? '客户' : x.role === 'system' ? '（事件）' : '大师'}：${x.content.slice(0, 1500)}`).join('\n');
       const r = await llmJSON('你是记忆整理助手。把命理咨询对话压缩成要点，供以后继续对话使用。只输出 JSON：{"summary":"300字内，按时间顺序概括客户问了什么、大师的主要结论和建议","events":["客户自述的人生事件，如2019年换工作，最多5条"],"prefs":["客户的偏好或关注点，最多3条"]}',
         `【已有摘要】${cs?.text || '无'}\n【新对话】\n${dialog}`);
       const text = (r?.summary ? String(r.summary) : old.filter((x) => x.role === 'user').map((x) => x.content.slice(0, 40)).join('；')).slice(0, 800);
@@ -116,6 +129,7 @@ export async function enforceBudget(uid: string, m?: Memory) {
 /** 组装注入 system 的记忆块（受 CONTEXT_LIMIT 控制，远低于模型上下文） */
 export async function memoryContext(uid: string, cid: string): Promise<string> {
   const m = await getStore().getMemory(uid);
+  const events = (await getStore().getMessages(uid, cid, m.convSummaries[cid]?.lastId || 0).catch(() => [])).filter((x) => x.role === 'system').slice(-3).map((x) => x.content);
   const f = m.facts || {};
   const facts: any = {};
   if (f.birth) facts.出生信息 = f.birth;
@@ -128,6 +142,7 @@ export async function memoryContext(uid: string, cid: string): Promise<string> {
   const conv = m.convSummaries[cid]?.text ? `【本次对话较早部分摘要】\n${m.convSummaries[cid].text}` : '';
   // 超限时先裁长期印象（保留最近部分），出生信息与命盘摘要永不裁剪
   while (estTokens([core, lt, conv].join('\n\n')) > CONTEXT_LIMIT && lt.length > 50) lt = '【长期印象】\n…' + lt.slice(Math.floor(lt.length * 0.3));
-  const out = [core, lt, conv].filter(Boolean).join('\n\n');
+  const ev = events.length ? `【本次对话中的操作记录】\n${events.join('\n')}` : '';
+  const out = [core, lt, conv, ev].filter(Boolean).join('\n\n');
   return out;
 }

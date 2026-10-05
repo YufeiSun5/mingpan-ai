@@ -15,6 +15,8 @@ export function createMemoryStore(): Store {
     async linkWechat(id, o) { const u = users.get(id); if (u) { u.wechatOpenid = o; u.kind = 'wechat'; } },
     async saveProfile(uid, key, data, chart) { const l = profiles.get(uid) || []; let p = l.find((x) => x.key === key); if (!p) { p = { id: 'p' + ++seq, key }; l.push(p); } Object.assign(p, { data, chart, updatedAt: now() }); profiles.set(uid, l); return p.id; },
     async getProfiles(uid) { return (profiles.get(uid) || []).map((p) => ({ id: p.id, data: p.data, updatedAt: p.updatedAt })); },
+    async getProfile(uid, id) { const p = (profiles.get(uid) || []).find((x) => x.id === id); return p ? { id: p.id, data: p.data, chart: p.chart } : null; },
+    async updateProfile(uid, id, key, data, chart) { const p = (profiles.get(uid) || []).find((x) => x.id === id); if (p) Object.assign(p, { key, data, chart, updatedAt: now() }); return id; },
     async ensureConversation(uid, cid) { if (!conv(uid).has(cid)) conv(uid).set(cid, []); },
     async hasConversation(uid, cid) { return conv(uid).has(cid); },
     async appendMessages(uid, cid, msgs) { await s.ensureConversation(uid, cid); conv(uid).get(cid)!.push(...msgs.map((m) => ({ ...m, id: ++seq, createdAt: now() }))); },
