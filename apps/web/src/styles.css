@@ -150,8 +150,11 @@ button,input,textarea{font-family:inherit}
 #send:active{transform:scale(.92)}#send:disabled{opacity:.3}
 .foot{position:relative;z-index:3;flex:none;text-align:center;font-size:10.5px;color:var(--ink4);padding:0 16px 6px;padding-bottom:max(6px,env(safe-area-inset-bottom));background:rgba(246,243,237,.9)}
 .foot a{color:var(--ink3);text-decoration:none}
-.jump{position:absolute;z-index:4;left:50%;transform:translateX(-50%);padding:7px 15px;border:.5px solid var(--line2);border-radius:999px;background:rgba(255,254,251,.96);color:var(--ink);font:500 12.5px/1.4 var(--sans);box-shadow:0 8px 20px -8px rgba(30,20,10,.3);cursor:pointer;animation:rise .25s ease both}
+.jump-anchor{position:relative;z-index:4;flex:none;height:0}
+.jump{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:4px;white-space:nowrap;height:30px;padding:0 13px;border:.5px solid var(--line2);border-radius:999px;background:rgba(255,254,251,.97);color:var(--ink);font:500 12px/1 var(--sans);letter-spacing:.02em;box-shadow:0 6px 16px -6px rgba(30,20,10,.28);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);cursor:pointer;animation:jumpIn .22s ease-out both}
 .jump[hidden]{display:none}
+.jump:active{transform:translateX(-50%) scale(.96)}
+@keyframes jumpIn{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
 .notice{display:block;width:max-content;max-width:90%;margin:6px auto;font-size:11px;color:var(--ink3);background:var(--surface2);border-radius:999px;padding:3px 10px}
 
 
@@ -200,15 +203,16 @@ button,input,textarea{font-family:inherit}
   .row.me{margin-left:96px}
   .hero{padding-top:40px}
 }
-/* 宽屏：命盘固定在右侧 */
-@media (min-width:1100px){
-  .shell{gap:0}
+/* 宽屏（≥900，含横屏平板 / 展开的折叠屏）：命盘固定在右侧；聊天列不少于 480px，侧栏 340–420px */
+@media (min-width:900px){
   .app{border-left:.5px solid var(--line2);border-right:.5px solid var(--line2)}
-  .shell.has-chart .side{display:block;flex:0 0 min(440px,34vw);height:100%;overflow-y:auto;overscroll-behavior:contain;padding:20px 20px 28px}
+  .shell.has-chart .app{min-width:480px}
+  .shell.has-chart .side{display:block;flex:0 0 clamp(340px,34vw,420px);min-width:0;height:100%;overflow-y:auto;overscroll-behavior:contain;padding:16px 14px 24px}
   .side-in{position:sticky;top:0}
   .side-card{max-width:none;border-radius:22px}
   .shell.has-chart .row-chart{display:none}
 }
+@media (min-width:1200px){ .shell.has-chart .side{padding:20px 20px 28px} }
 /* 双屏折叠设备：左右两段各放聊天与命盘 */
 @media (horizontal-viewport-segments:2){
   .shell.has-chart .side{display:block;flex:0 0 env(viewport-segment-width 1 0);height:100%;overflow-y:auto;padding:16px}

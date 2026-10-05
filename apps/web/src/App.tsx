@@ -47,7 +47,7 @@ export function App() {
           {state.stream !== null && <Streaming text={state.stream} cont={lastIsBot} />}
           {busy && state.stream === null && <Typing cont={lastIsBot} />}
         </main>
-        {showJump && <button type="button" className="jump" onClick={jump}>↓ 新消息</button>}
+        <div className="jump-anchor">{showJump && <button type="button" className="jump" onClick={jump}>↓ 新消息</button>}</div>
         {!busy && state.quick.length > 0 && <QuickReplies items={state.quick} onPick={onPick} />}
         <Composer disabled={busy} onSend={onSend} />
         <footer className="foot"><a href="/terms.html">用户协议与隐私说明</a> · 内容由 AI 基于传统文化生成，仅供娱乐参考</footer>
