@@ -14,3 +14,5 @@ export { SC };
 export * from './diff';
 export { compatRelations, briefBazi } from './compat';
 export type { CompatResult } from './compat';
+
+export { computeShenSha, SHEN_SHA_DESC } from './shensha';

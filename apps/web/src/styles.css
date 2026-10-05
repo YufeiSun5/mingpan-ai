@@ -98,6 +98,30 @@ button,input,textarea{font-family:inherit}
 .sha-bar{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--tap);margin-top:6px;border:.5px solid var(--line2);border-radius:12px;background:var(--surface2);color:var(--zhu);font-size:13.5px;font-weight:600;letter-spacing:1px}
 .sha-bar:active{background:var(--zhu-soft)}
 
+/* 流年/大运列头高亮、神煞可点、司令徽章、弹层 */
+.mp-cel.hd.hi{color:var(--zhu);font-weight:700;background:var(--zhu-soft)}
+.mp-cel.soft{background:rgba(178,58,48,.03)}
+.seal.inline{display:inline;margin-left:6px;padding:1px 6px;vertical-align:1px}
+.sha-chip{font-style:normal;font-size:9.5px;line-height:1.35;padding:1px 4px;border-radius:4px;background:var(--surface2);color:var(--ink2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sha-item{border:0;background:var(--surface2);color:var(--ink2);font-size:9.5px;line-height:1.35;padding:1px 4px;border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:auto;min-width:auto}
+.sha-panel{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px;padding:10px;background:var(--surface2);border-radius:12px}
+.sha-pick{min-height:var(--tap);padding:0 14px;border:0;border-radius:999px;background:var(--surface);color:var(--ink);font-size:13.5px;font-weight:500;box-shadow:0 1px 0 rgba(30,20,10,.06)}
+.sha-pick:active{background:var(--zhu-soft);color:var(--zhu)}
+.sha-item:active{background:var(--zhu-soft);color:var(--zhu)}
+.badge-sl i.sl{font-style:normal;font-family:var(--display);font-size:16px;color:var(--zhu);margin-left:2px}
+.mp-cel .hide i.si-ling{background:rgba(178,58,48,.08);border-radius:4px;padding:0 2px}
+.mp-cel .hide .sl-mark{font-size:8px;color:#fff;background:var(--zhu);border-radius:3px;padding:0 2px;margin-left:1px;font-weight:600;line-height:1.2}
+.mp-cel.hd .shi-tag{display:block;font-size:9px;color:var(--zhu);letter-spacing:0;font-weight:600;margin-top:1px}
+.sha-list .sha-item{width:100%}
+
+.sha-tip{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;justify-content:center;background:rgba(30,22,16,.35);padding:16px;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+.sha-tip-card{width:100%;max-width:400px;background:var(--surface);border-radius:16px;padding:18px 16px 14px;box-shadow:var(--shadow)}
+.sha-tip-card b{display:block;font-family:var(--display);font-size:18px;letter-spacing:2px;margin-bottom:8px}
+.sha-tip-card p{margin:0 0 14px;font-size:14.5px;line-height:1.7;color:var(--ink2)}
+.sha-tip-ok{width:100%;min-height:var(--tap);border:0;border-radius:12px;background:var(--zhu);color:#fff;font-size:15px;font-weight:600}
+@media (min-width:640px){.sha-tip{align-items:center}}
+
+
 
 
 

@@ -5,3 +5,4 @@ export * from './client';
 export * from './text';
 export * from './chatState';
 export * from './diff';
+export { SHEN_SHA_DESC } from './shensha';

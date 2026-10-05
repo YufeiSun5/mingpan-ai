@@ -172,9 +172,9 @@ function computeChart(input) {
     xiaoYun,
     pro: null as any,
   } as any;
-  const gender = g ? '男' : '女';
+  const gender: '男' | '女' = g ? '男' : '女';
   const pro = buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, timeUnknown, shiShenOf, solarYear: solar.getYear(), solar, lunar, gender });
-  const ctx = { yearGan: pillars[0].gan, yearZhi: pillars[0].zhi, monthZhi: pillars[1].zhi, dayKong: pro.dayKong };
+  const ctx = { yearGan: pillars[0].gan, yearZhi: pillars[0].zhi, monthZhi: pillars[1].zhi, dayZhi: pillars[2].zhi, dayKong: pro.dayKong, gender };
   const withCol = (gz: string, label: string) => columnOf(dayGan, gz, { ...ctx, label });
   for (const d of daYun) (d as any).col = withCol(d.ganZhi, '大运');
   for (const y of liuNian) (y as any).col = withCol(y.ganZhi, '流年');

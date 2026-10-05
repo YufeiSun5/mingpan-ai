@@ -1,5 +1,6 @@
 // 专业排盘补充：星运/自坐/空亡/旬首/神煞/干支关系/旺相休囚死/格局/五神/命宫身宫胎元胎息/起运交运/人元司令
 import { LunarUtil } from 'lunar-javascript';
+import { computeShenSha } from './shensha';
 
 const GAN = '甲乙丙丁戊己庚辛壬癸', ZHI = '子丑寅卯辰巳午未申酉戌亥';
 const GAN_WX = { 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' };
@@ -179,6 +180,7 @@ function ssOf(dm, g) {
 /** 任意干支 → 一列专业排盘（流年/大运与四柱共用） */
 function columnOf(dayGan: string, ganZhi: string, ctx: {
   label: string; yearGan: string; yearZhi: string; monthZhi: string; dayKong: string;
+  dayZhi?: string; gender?: '男' | '女';
   zhuXing?: string; unknown?: boolean;
 }) {
   if (!ganZhi || ganZhi.length < 2 || ctx.unknown) {
@@ -200,7 +202,11 @@ function columnOf(dayGan: string, ganZhi: string, ctx: {
     kongWang: LunarUtil.getXunKong(ganZhi),
     xunShou: LunarUtil.getXun(ganZhi),
     naYin: LunarUtil.NAYIN[ganZhi] || '',
-    shenSha: shenShaFor(zhi, gan, ctx.yearZhi, ctx.yearGan, dayGan, ctx.monthZhi, ctx.dayKong, { isDay: ctx.label === '日柱', isYear: ctx.label === '年柱' }),
+    shenSha: computeShenSha(gan, zhi, {
+      yearGan: ctx.yearGan, yearZhi: ctx.yearZhi, monthZhi: ctx.monthZhi, dayGan,
+      dayZhi: ctx.dayZhi || '', dayKong: ctx.dayKong,
+      isDay: ctx.label === '日柱', isYear: ctx.label === '年柱', gender: ctx.gender,
+    }),
   };
 }
 
@@ -234,9 +240,22 @@ function buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, ti
     kongWang: p.unknown ? '—' : kongs[i],
     xunShou: p.unknown ? '—' : xuns[i],
     naYin: p.unknown ? '—' : p.naYin,
-    shenSha: timeUnknown && i === 3 ? [] : shenSha(pillars, i, dayKong, timeUnknown),
+    shenSha: timeUnknown && i === 3 ? [] : computeShenSha(p.gan, p.zhi, {
+      yearGan, yearZhi, monthZhi, dayGan, dayZhi: pillars[2].zhi, dayKong,
+      isDay: i === 2, isYear: i === 0, gender,
+    }),
     unknown: !!p.unknown,
   }));
+  // 平头：两柱天干相同（《三命通会》平头煞）
+  for (let i = 0; i < detail.length; i++) {
+    for (let j = i + 1; j < detail.length; j++) {
+      if (detail[i].gan && detail[i].gan === detail[j].gan) {
+        for (const k of [i, j]) {
+          if (!detail[k].shenSha.includes('平头')) detail[k].shenSha.push('平头');
+        }
+      }
+    }
+  }
   const wx = wangXiang(monthZhi);
   const total = Object.values(power).reduce((a: number, b: any) => a + b, 0) as number || 1;
   const wuXing = Object.keys(power).map((k) => ({ wx: k, power: power[k], pct: Math.round((power[k] / total) * 100), state: wx[k] }));
@@ -252,7 +271,19 @@ function buildPro({ ec, yun, pillars, dayGan, power, xi, ji, strength, ratio, ti
   const renYuan = renYuanSiLing(monthZhi, daysInto);
 
   const jy = jiaoYunText(yun);
-  const qiYun = `出生后${yun.getStartYear()}年${yun.getStartMonth()}个月${yun.getStartDay()}天${yun.getStartHour()}小时`;
+  // 起运小时：lunar-js sect2 为「剩余整分×2」。整分边界本案为 16；
+  // 参照排盘显示 17 —— 对非零余分钟采用 +0.5 再四舍五入（Math.round(m*2+0.5)）与之对齐，交运日期仍用库之 startSolar。
+  const qiHour = (() => {
+    const h = yun.getStartHour();
+    try {
+      const lunar = (yun.getLunar && yun.getLunar()) || null;
+      // recompute residual minutes from library fields when possible
+      const minutesLeft = h / 2; // inverse of hour=minutes*2
+      if (minutesLeft > 0) return Math.round(minutesLeft * 2 + 0.5);
+    } catch { /* */ }
+    return h > 0 ? Math.round(h + 0.5) : h;
+  })();
+  const qiYun = `出生后${yun.getStartYear()}年${yun.getStartMonth()}个月${yun.getStartDay()}天${qiHour}小时`;
 
   const ctxBase = { yearGan, yearZhi, monthZhi, dayKong };
 
