@@ -320,9 +320,9 @@ const CARD_LINES = [
 ];
 
 /** 排盘后的第一句话（含真太阳时校正说明） */
-function readingIntro(prof, chart) {
+function readingIntro(prof, chart, edited = false) {
   const ts = chart.trueSolar;
-  return `好了，${prof.name ? prof.name + '，' : ''}你的盘排出来了，你先看看${ts ? `\n（按${ts.city}真太阳时校正：${ts.time.slice(11, 16)}，${chart.lunar.split(' ').pop()}）` : ''}`;
+  return `${edited ? `好，按改过的生辰（${profileLine({ ...prof, topics: [] })}）重新排了一盘，你看看` : `好了，${prof.name ? prof.name + '，' : ''}你的盘排出来了，你先看看`}${ts ? `\n（按${ts.city}真太阳时校正：${ts.time.slice(11, 16)}，${chart.lunar.split(' ').pop()}）` : ''}`;
 }
 
 /** 一行生辰摘要（用于系统事件 / 记忆） */

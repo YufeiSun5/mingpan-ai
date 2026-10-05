@@ -36,11 +36,12 @@ app.use(express.static(WEB, {
 
 const json = (limit: number | string) => express.json({ limit });
 const smallJson = json(rateLimit.MAX_BODY_BYTES);
-const limited = (req: Request, res: Response, next: NextFunction) => {
-  const r = rateLimit.check(req.ip);
+const limiter = (bucket: 'llm' | 'light') => (req: Request, res: Response, next: NextFunction) => {
+  const r = rateLimit.check(req.ip, bucket);
   if (r.ok) return next();
   res.set('Retry-After', String(r.retryAfter)).status(429).json({ error: r.reason });
 };
+const limited = limiter('llm'), light = limiter('light');
 const wrap = (fn: (req: Request, res: Response) => Promise<any>) => async (req: Request, res: Response) => {
   try { const out = await fn(req, res); if (out !== undefined && !res.headersSent) res.json(out); }
   catch (e) { console.error(e); if (!res.headersSent) res.status(e.status || 500).json({ error: e.status ? e.message : '服务器开小差了，请稍后再试' }); }
@@ -142,14 +143,14 @@ const optCid = (v: any) => (typeof v === 'string' && CID_RE.test(v) ? v : null);
 const nowYearOf = (b: any) => (+b?.nowYear >= 1900 && +b?.nowYear <= 2200 ? +b.nowYear : new Date().getFullYear());
 const birthKey = (p: any) => [p.gender, p.calendar, p.year, p.month, p.day, p.leap ? 1 : 0, JSON.stringify(p.time || null), p.city || ''].join('|');
 
-app.post('/api/v1/conversations', limited, wrap(async (req) => {
+app.post('/api/v1/conversations', light, wrap(async (req) => {
   const uid = needUser(req); await store.ensureUser(uid);
   const cid = crypto.randomBytes(12).toString('base64url');
   await store.ensureConversation(uid, cid);
   return { cid };
 }));
 app.get('/api/v1/profiles', wrap(async (req) => ({ profiles: await store.getProfiles(needUser(req)) })));
-app.post('/api/v1/profiles', smallJson, limited, wrap(async (req, res) => {
+app.post('/api/v1/profiles', smallJson, light, wrap(async (req, res) => {
   const uid = needUser(req); await store.ensureUser(uid);
   const v = validateProfile(req.body?.profile, nowYearOf(req.body));
   if (v.error) { res.status(422); return { error: v.error }; }
@@ -158,7 +159,7 @@ app.post('/api/v1/profiles', smallJson, limited, wrap(async (req, res) => {
   console.log(`[profile] create ${uid} ${id}`);
   return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart) };
 }));
-app.patch('/api/v1/profiles/:id', smallJson, limited, wrap(async (req, res) => {
+app.patch('/api/v1/profiles/:id', smallJson, light, wrap(async (req, res) => {
   const uid = needUser(req);
   const cur = await store.getProfile(uid, String(req.params.id));
   if (!cur) { res.status(404); return { error: '档案不存在' }; }
@@ -168,7 +169,7 @@ app.patch('/api/v1/profiles/:id', smallJson, limited, wrap(async (req, res) => {
   const id = await store.updateProfile(uid, cur.id, birthKey(v.profile), v.profile, v.chart);
   await recordProfileEvent(uid, optCid(req.body?.cid), v.profile, v.chart, `用户修改并确认了生辰信息：${profileLine(v.profile)}`);
   console.log(`[profile] update ${uid} ${id}`);
-  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart) };
+  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart, true) };
 }));
 // 详批：SSE / ?stream=0 / ?mode=poll
 app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) => {
