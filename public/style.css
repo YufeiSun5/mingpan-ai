@@ -36,7 +36,7 @@ button,input,textarea{font-family:inherit}
 .reset.warn{background:var(--zhu);border-color:var(--zhu);color:#fff7e6}
 
 /* 消息区 */
-.list{position:relative;z-index:1;flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 12px 18px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right));scroll-behavior:smooth}
+.list{position:relative;z-index:1;flex:1;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding:14px 12px 18px;padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
 .hero{text-align:center;padding:14px 0 6px}
 .hero img{width:64px;height:64px;filter:drop-shadow(0 4px 10px rgba(122,23,28,.25))}
 .hero h1{margin:8px 0 2px;font-family:var(--display);font-size:22px;letter-spacing:6px;color:var(--mo);font-weight:700}
@@ -45,10 +45,10 @@ button,input,textarea{font-family:inherit}
 .hero-rule i{flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--jin))}.hero-rule i:last-child{transform:scaleX(-1)}
 
 .row{display:flex;gap:9px;margin:12px 0;align-items:flex-start;animation:rise .38s cubic-bezier(.2,.8,.2,1) both}
-.row.me{flex-direction:row-reverse}
+.row.me{flex-direction:row-reverse;margin-left:44px}
+.row.me .bubble{max-width:min(100%,420px)}
 .row.cont{margin-top:-4px}.row.cont .avatar{visibility:hidden}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-.spacer{flex:none;width:36px}
 
 .bubble{position:relative;max-width:min(80%,400px);background:var(--xuan2);border:1px solid rgba(184,147,90,.38);border-radius:4px 16px 16px 16px;padding:11px 14px;font-size:15.5px;line-height:1.82;letter-spacing:.2px;color:var(--mo);
   box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 6px 18px -8px rgba(90,60,30,.25);word-break:break-word}
@@ -132,3 +132,5 @@ button,input,textarea{font-family:inherit}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* 强制浅色：即使系统/内置浏览器开启深色模式也保持宣纸配色 */
 @media (prefers-color-scheme:dark){html,body{background:#e6d9c1}}
+.jump{position:absolute;z-index:4;left:50%;bottom:calc(var(--jump-b,128px));transform:translateX(-50%);padding:6px 14px;border:1px solid rgba(184,147,90,.55);border-radius:999px;background:rgba(255,253,247,.96);color:var(--zhu);font:600 13px/1.4 var(--sans);box-shadow:0 6px 16px -6px rgba(90,60,30,.45);cursor:pointer;animation:rise .25s ease both}
+.jump[hidden]{display:none}

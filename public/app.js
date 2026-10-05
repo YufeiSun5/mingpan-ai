@@ -36,7 +36,7 @@
     const prev = list.lastElementChild;
     const cont = !me && prev && prev.classList.contains('row') && !prev.classList.contains('me');
     r.className = 'row' + (me ? ' me' : '') + (cont ? ' cont' : '');
-    r.innerHTML = (me ? '<div class="spacer"></div>' : AVATAR) + `<div class="${cls || 'bubble'}">${inner}</div>`;
+    r.innerHTML = (me ? '' : AVATAR) + `<div class="${cls || 'bubble'}">${inner}</div>`;
     list.appendChild(r);
     if (cls === 'card') requestAnimationFrame(() => r.querySelectorAll('[data-w]').forEach((el) => (el.style.width = el.dataset.w + '%')));
     return r;
@@ -50,13 +50,34 @@
   function renderAll() {
     list.querySelectorAll('.row').forEach((n) => n.remove());
     if (!S.items.length) GREETING.forEach((t) => S.items.push({ type: 'bot', text: t }));
-    S.items.forEach(renderItem); renderQuick(S.quick); scroll();
+    S.items.forEach(renderItem); renderQuick(S.quick); scroll(true);
   }
   function renderQuick(arr) {
     S.quick = arr || [];
     quick.innerHTML = S.quick.map((q, i) => `<button type="button" class="${q.startsWith('对，') ? 'primary' : ''}" data-i="${i}">${esc(q)}</button>`).join('');
   }
-  const scroll = () => requestAnimationFrame(() => (list.scrollTop = list.scrollHeight));
+  // ---------- 智能滚动：用户在底部附近才自动跟随；上滑阅读时不打扰，显示"↓ 新消息" ----------
+  let follow = true, rafId = 0, lastIntent = 0, touching = false;
+  const jump = document.createElement('button');
+  jump.type = 'button'; jump.className = 'jump'; jump.textContent = '↓ 新消息'; jump.hidden = true;
+  list.parentNode.insertBefore(jump, list.nextSibling);
+  const nearBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+  const intent = () => { lastIntent = Date.now(); };
+  list.addEventListener('touchstart', () => { touching = true; intent(); }, { passive: true });
+  list.addEventListener('touchend', () => { touching = false; intent(); }, { passive: true });
+  list.addEventListener('wheel', intent, { passive: true });
+  list.addEventListener('keydown', intent);
+  list.addEventListener('scroll', () => {
+    if (nearBottom()) { follow = true; jump.hidden = true; }
+    else if (touching || Date.now() - lastIntent < 1200) follow = false; // 只有用户主动滚动才停止跟随
+  }, { passive: true });
+  const toBottom = () => { rafId = 0; list.scrollTop = list.scrollHeight; };
+  const scroll = (force) => {
+    if (force === true) follow = true;
+    if (!follow) { if (jump.hidden) { jump.style.bottom = (list.parentNode.getBoundingClientRect().bottom - list.getBoundingClientRect().bottom + 12) + 'px'; jump.hidden = false; } return; }
+    if (!rafId) rafId = requestAnimationFrame(toBottom); // 每帧最多一次，避免逐字抖动
+  };
+  jump.onclick = () => { follow = true; jump.hidden = true; list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' }); };
 
   const GWX = { 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' };
   const ZWX = { 子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火', 午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水' };
@@ -86,7 +107,7 @@
     if (busy || (!text && !action)) return;
     busy = true; sendBtn.disabled = true; renderQuick([]);
     if (text) { S.items.push({ type: 'user', text }); S.llm.push({ role: 'user', content: text }); renderItem(S.items[S.items.length - 1]); }
-    save(); scroll();
+    save(); scroll(true);
     let typing = row(false, '<span class="typing"><i></i><i></i><i></i></span>');
     let stream = null; // { text, rows: [] }
     const dropTyping = () => { if (typing) { typing.remove(); typing = null; } };
