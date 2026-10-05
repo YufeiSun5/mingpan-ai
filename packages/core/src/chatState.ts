@@ -24,7 +24,6 @@ export function applyEvent(s0: ChatState, [ev, d]: ChatEvent): ChatState {
     case 'bubble': return s;
     case 'text': return { ...s, items: [...s.items, { type: 'bot', text: d.text }], llm: [...s.llm, { role: 'assistant', content: d.text }] };
     case 'chart': return { ...s, items: [...s.items, { type: 'chart', chart: d.chart }] };
-    case 'score': return { ...s, items: [...s.items, { type: 'score', score: d.score }] };
     case 'pending': return { ...s, pending: d.pending };
     case 'profile': return { ...s, profile: d.profile, pending: null };
     case 'quick': return { ...s, quick: d.replies || [] };
@@ -37,7 +36,7 @@ export function migrateState(raw: any): ChatState {
   if (!raw || typeof raw !== 'object') return freshState();
   const s = freshState();
   if (raw.cid) s.cid = String(raw.cid);
-  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart', 'score'].includes(x.type)) : [];
+  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart'].includes(x.type)  /* 旧版评分卡不再展示 */) : [];
   s.llm = Array.isArray(raw.llm) ? raw.llm.filter((m: any) => m && typeof m.content === 'string') : [];
   s.pending = raw.pending || null; s.profile = raw.profile || null; s.quick = Array.isArray(raw.quick) ? raw.quick : [];
   return s;

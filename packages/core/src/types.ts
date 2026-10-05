@@ -31,13 +31,14 @@ export interface Chart {
   pro: ProChart;
 }
 export interface ScoreDim { k: string; score: number; base: number; reason: string }
+/** 仅服务端内部使用（日志 / 数据库 / 管理端），不会下发给客户端 */
 export interface ScoreCard { health: number; level: 'good' | 'mid' | 'low'; verdict: 'ok' | 'caution' | 'no'; note: string; period: string; dims: ScoreDim[]; flags: string[] }
 export interface LlmMessage { role: 'user' | 'assistant'; content: string }
 
 /** 服务端推送的事件（SSE / JSON 回放 / 轮询 共用） */
 export type ChatEvent =
   | ['text', { text: string }] | ['delta', { text: string }] | ['bubble', Record<string, never>]
-  | ['chart', { chart: Chart }] | ['score', { score: ScoreCard }] | ['pending', { pending: Profile }]
+  | ['chart', { chart: Chart }] | ['pending', { pending: Profile }]
   | ['profile', { profile: Profile }] | ['quick', { replies: string[] }] | ['error', { error: string }]
   | ['crisis', Record<string, never>] | ['ping', Record<string, never>] | ['done', { source?: string }];
 export type ChatEventName = ChatEvent[0];
@@ -46,4 +47,4 @@ export interface ChatRequest { cid?: string; messages: LlmMessage[]; pending: Pr
 
 export type ChatItem =
   | { type: 'user'; text: string } | { type: 'bot'; text: string }
-  | { type: 'chart'; chart: Chart } | { type: 'score'; score: ScoreCard };
+  | { type: 'chart'; chart: Chart };

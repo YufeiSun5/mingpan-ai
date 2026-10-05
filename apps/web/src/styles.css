@@ -131,26 +131,6 @@ button,input,textarea{font-family:inherit}
 .ln .cur{background:var(--zhu-soft);border-radius:6px}
 .ln .fav span:nth-child(3){color:var(--good)}.ln .unfav span:nth-child(3){color:var(--bad)}
 
-/* 评分卡 */
-.card.score{padding:14px 14px 12px}
-.sc-h{display:flex;align-items:center;gap:12px}
-.ring{--p:0;--c:var(--good);flex:none;position:relative;width:56px;height:56px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p) * 1%),rgba(38,30,24,.07) 0);display:grid;place-items:center;transition:--p 1s}
-.ring::before{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--surface)}
-.ring span{position:relative;font-family:var(--display);font-size:19px;font-weight:700;color:var(--c)}
-.ring.lv-mid{--c:var(--mid)}.ring.lv-low{--c:var(--bad)}
-@property --p{syntax:"<number>";inherits:false;initial-value:0}
-.sc-t{min-width:0}
-.sc-l{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:var(--ink)}
-.vd{font-size:10.5px;font-weight:600;border-radius:6px;padding:1px 7px}
-.vd-ok{color:var(--good);background:rgba(63,138,99,.1)}.vd-caution{color:var(--mid);background:rgba(184,137,58,.12)}.vd-no{color:var(--bad);background:rgba(196,71,58,.1)}
-.sc-n{margin-top:3px;font-size:12px;color:var(--ink3);line-height:1.5}
-.sc-p{margin:14px 0 8px;font-size:11px;color:var(--ink3);letter-spacing:1px;padding-top:12px;border-top:.5px solid var(--line2)}
-.dims{display:grid;gap:10px}
-.dm-h{display:grid;grid-template-columns:34px 1fr 26px;gap:8px;align-items:center}
-.dm-h b{font-size:12.5px;font-weight:600}
-.dm-h span{font-family:var(--display);font-size:14px;text-align:right}
-.dm .t i.g{--c:var(--good)}.dm .t i.m{--c:var(--mid)}.dm .t i.l{--c:var(--bad)}
-.dm p{margin:3px 0 0 42px;font-size:11px;color:var(--ink3);line-height:1.5}
 
 /* 快捷回复 */
 .quick{position:relative;z-index:2;flex:none;display:flex;gap:8px;overflow-x:auto;padding:4px 16px 10px;padding-left:max(16px,env(safe-area-inset-left));scrollbar-width:none;mask-image:linear-gradient(90deg,#000 90%,transparent);-webkit-mask-image:linear-gradient(90deg,#000 90%,transparent)}

@@ -121,20 +121,32 @@ function ganZhiSet(chart) {
 }
 const GZ_RE = /[甲乙丙丁戊己庚辛壬癸][子丑寅卯辰巳午未申酉戌亥]/g;
 
-/** 生成给 LLM 的评分基准说明 */
+const LEVEL_WORD = (n: number) => (n >= 82 ? '很旺' : n >= 68 ? '偏旺' : n >= 52 ? '平稳' : n >= 42 ? '偏弱' : '受压');
+const HOW: Record<string, string> = {
+  harm: '想伤害、报复他人', force: '想不择手段控制或挽回别人', gamble: '想靠赌博或孤注一掷暴富', medical: '想用转运代替看病治疗',
+  cheat: '违背伦理（出轨、拆散别人）', reckless: '冲动冒进、押上全部', crisis: '可能有轻生念头',
+};
+/** 生成注入 system 的隐藏指引（只用定性措辞，不出现分数，避免外泄） */
 function scorePrompt(chart, year, q, defaultDims?: string[]) {
   const b = baseScores(chart, year);
   const c = classify(q);
   const dims = defaultDims || pickDims(q);
-  const lines = DIMS.map((d) => `- ${d}：${b.dims[d]?.base ?? '-'}（${b.dims[d]?.reason ?? ''}）`).join('\n');
+  const lines = dims.map((d) => `- ${d}：${LEVEL_WORD(b.dims[d]?.base ?? 60)}（${b.dims[d]?.reason ?? ''}）`).join('\n');
+  const flagged = c.flags.filter((f) => f !== 'crisis');
+  const refuse = c.cap <= 30, careful = !refuse && c.cap < 100;
+  const how = refuse
+    ? `这次所问属于「${flagged.map((f) => HOW[f]).join('、')}」，必须拒绝：开口第一句就明确说"不行"或"这个真的不行"；接着用上面的排盘依据（具体的流年/大运干支、十神、喜忌、刑冲）讲清楚为什么命里不支持、硬来会怎样；再温和地给一个建设性的替代办法；最后一句吉祥话收尾。`
+    : careful
+      ? `这次所问有「${flagged.map((f) => HOW[f]).join('、')}」的倾向，要直说利害、劝他稳一稳，用排盘依据说明为什么不宜冒进，再给稳妥的做法。`
+      : '这次所问是正常的问题，按命盘如实、正面地解读。如果你自己判断问题本身过度、不健康或不道德（比如伤害别人、违法、赌博、用算命代替看病），同样要明确说"不行"，用排盘依据讲清楚原因，再给替代办法和吉祥话。';
   return {
     base: b, cls: c, dims,
-    text: `【评分基准（程序依据排盘计算，${b.period}）】\n${lines}\n建议维度：${dims.join('、')}\n规则预判：${c.labels.length ? `命中「${c.labels.join('、')}」，问题健康度不得高于 ${c.cap}` : '未命中不良规则'}`,
+    text: `【内部参考——只供你心里有数，回答里绝不能提到"参考""评分""分数""健康度""规则""程序"这类字眼，也不要说任何分值】\n${b.period}，与所问相关的几方面气势（据排盘推算）：\n${lines}\n${how}${c.flags.includes('medical') ? '\n涉及疾病：一定要明确说"一定要听医生的，按医生的方案治疗"，命理只作心态和调养参考。' : ''}`,
   };
 }
 
 /** 校验 LLM 给出的评分 JSON，与基准合成最终评分卡 */
-function buildCard(chart, ctx, raw) {
+function buildCard(chart, ctx, raw?: any) {
   const { base, cls, dims: defDims } = ctx;
   const j = raw && typeof raw === 'object' ? raw : {};
   const gz = ganZhiSet(chart);
@@ -143,7 +155,7 @@ function buildCard(chart, ctx, raw) {
   if (!cls.flags.length && !Number.isFinite(+j.health)) health = 85;
   let verdict = ['ok', 'caution', 'no'].includes(j.verdict) ? j.verdict : null;
   if (cls.cap <= 30) verdict = 'no';
-  if (!verdict) verdict = health >= 70 ? 'ok' : health >= 45 ? 'caution' : 'no';
+  if (!verdict) verdict = raw ? (health >= 70 ? 'ok' : health >= 45 ? 'caution' : 'no') : (cls.cap <= 30 ? 'no' : cls.cap < 100 ? 'caution' : 'ok');
   const note = typeof j.healthNote === 'string' && j.healthNote.trim() ? j.healthNote.trim().slice(0, 40) : cls.labels.length ? `问题涉及「${cls.labels[0]}」，大师会直说利害` : '问题合理，可以放心细看';
   const llmDims = Array.isArray(j.dims) ? j.dims.filter((d) => d && DIMS.includes(d.k)) : [];
   let names = [...new Set(llmDims.map((d) => d.k))].slice(0, 5);

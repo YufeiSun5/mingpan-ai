@@ -92,41 +92,41 @@ function suggestions(chart) {
   return [`${n + 1}年我能结婚吗？`, love, '我适合做什么工作？', past ? `${past.year}年是不是不太顺？` : `${n}年下半年运势怎么样？`];
 }
 
-const SCORE_RE = /<score>\s*([\s\S]*?)\s*<\/score>/;
-// 流式输出：模型先输出 <score>{...}</score>，服务端解析校验后发 score 事件，正文再流式发送；JSON 异常时用确定性评分兜底
+// 内部用语过滤：评分只在服务端用于引导回答，任何内部字眼都不能出现在可见文本里
+const LEAK_RE = /<\/?score>|问题健康度|健康度|评分卡|评分|打分|基准分|规则预判|内部参考|据排盘推算|程序(推算|计算)/g;
+const BLOCK_RE = /<score>[\s\S]*?<\/score>/g;
+export const cleanVisible = (t: string) => t.replace(BLOCK_RE, '').replace(LEAK_RE, '');
+/** 流式过滤器：按标点/换行切分后再清洗，保证被拆在两个分片里的词也能过滤；只压住不到一句的尾巴，几乎不增加延迟 */
+function leakFilter(out: (t: string) => void) {
+  let pend = '';
+  const flush = (all = false) => {
+    let cut = all ? pend.length : Math.max(pend.search(/[^。！？，、；：…\n!?,;:）)」』"”]*$/), 0);
+    if (!all && cut === 0 && pend.length > 48) cut = pend.length - 8;
+    if (!all && pend.includes('<score') && !pend.includes('</score>')) return; // 等整块
+    if (cut <= 0) return;
+    const t = cleanVisible(pend.slice(0, cut)); pend = pend.slice(cut);
+    if (t) out(t);
+  };
+  return { push: (d: string) => { pend += d; flush(); }, end: () => flush(true) };
+}
+
+// 流式输出：评分由程序确定性计算（不让模型先吐 JSON），只作为服务端内部事件；正文第一个 token 起就直接流给客户端
 async function streamText(messages, emit, fallbackText, opts: any = {}) {
   const p = getProvider();
   const { chart, scoreCtx } = opts;
-  let scored = false, buf = '', passthrough = !scoreCtx;
-  const sendScore = (raw) => { if (scored || !scoreCtx) return; scored = true; emit('score', { score: SC.buildCard(chart, scoreCtx, raw) }); };
-  const onDelta = (d) => {
-    if (passthrough) return emit('delta', { text: d });
-    buf += d;
-    const m = buf.match(SCORE_RE);
-    if (m) {
-      let j = null; try { j = JSON.parse(m[1]); } catch { j = null; }
-      sendScore(j);
-      const rest = buf.slice(m.index + m[0].length).replace(/^\s+/, '');
-      passthrough = true; buf = '';
-      if (rest) emit('delta', { text: rest });
-    } else if ((!buf.trimStart().startsWith('<') && buf.trim().length > 8) || buf.length > 1500) {
-      sendScore(null); passthrough = true; // 模型没按格式输出评分：直接兜底
-      const t = buf.replace(/<\/?score>?/g, ''); buf = '';
-      emit('delta', { text: t });
-    }
-  };
+  if (scoreCtx && opts.onScore) opts.onScore(SC.buildCard(chart, scoreCtx)); // 只回调给服务端，不产生任何下发事件
+  const f = leakFilter((t) => emit('delta', { text: t }));
   if (p.available) {
     try {
-      const t0 = Date.now();
-      const full = await chatStream(messages, onDelta, opts.llm || {});
+      const t0 = Date.now(); let first = 0;
+      const full = await chatStream(messages, (d) => { if (!first) first = Date.now() - t0; f.push(d); }, opts.llm || {});
+      f.end();
       const u = getLastUsage();
-      console.log(`[LLM stream] ${p.name}:${p.model} ${Date.now() - t0}ms tokens=${u?.prompt_tokens}/${u?.completion_tokens}${u?.completion_tokens_details?.reasoning_tokens ? ' reasoning=' + u.completion_tokens_details.reasoning_tokens : ''} score=${scored ? 'ok' : 'none'}`);
-      if (!passthrough && buf) { sendScore(null); emit('delta', { text: buf.replace(SCORE_RE, '').replace(/<\/?score>?/g, '') }); }
-      const text = full.replace(SCORE_RE, '').replace(/^\s+/, '');
+      console.log(`[LLM stream] ${p.name}:${p.model} first=${first}ms total=${Date.now() - t0}ms tokens=${u?.prompt_tokens}/${u?.completion_tokens}${u?.completion_tokens_details?.reasoning_tokens ? ' reasoning=' + u.completion_tokens_details.reasoning_tokens : ''}`);
+      const text = cleanVisible(full).replace(/^\s+/, '');
       if (text.trim()) return { text, source: `${p.name}:${p.model}` };
-    } catch (e) { console.error('[LLM stream]', e.message); }
+    } catch (e) { console.error('[LLM stream]', e.message); f.end(); }
   }
-  sendScore(null);
   const text = fallbackText();
   for (let i = 0; i < text.length; i += 40) emit('delta', { text: text.slice(i, i + 40) });
   return { text, source: 'template' };
@@ -151,7 +151,7 @@ function followUpFallback(chart, q) {
   return `嗯，这个问题我看了一下。从你的命局看，日主${chart.dayMaster.gan}${chart.dayMaster.wuXing}${chart.dayMaster.strength}，喜用${chart.xiYong.join('、')}。顺着喜用神的方向去做，多用${chart.luck[0].colors.join('、')}，往${chart.luck[0].direction}发展，会越来越顺的。\n\n你也可以问我具体某一年，比如"${chart.nowYear + 1}年怎么样"。`;
 }
 
-async function handleChat(body, emit, ctx: { memory?: string } = {}) {
+async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any) => void } = {}) {
   const { messages, pending, profile, action, nowYear: ny } = sanitize(body || {});
   const nowYear = ny || new Date().getFullYear();
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
@@ -175,7 +175,7 @@ async function handleChat(body, emit, ctx: { memory?: string } = {}) {
     const scoreCtx = SC.scorePrompt(chart, year, q);
     const sys = fill(t.system, { CHART: chartToText(chart), NOW_YEAR: nowYear, NAME: profile.name || '', STYLE_GUIDE: loadStyle().guide, SCORE_CONTEXT: scoreCtx.text }) + (ctx.memory ? `\n\n${ctx.memory}` : '');
     emit('bubble', {});
-    const r = await streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx });
+    const r = await streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx, onScore: ctx.onScore });
     emit('done', { source: r.source });
     return;
   }
@@ -225,7 +225,7 @@ async function handleChat(body, emit, ctx: { memory?: string } = {}) {
   const scoreCtx = SC.scorePrompt(chart, nowYear, qText, prof.topics?.length ? SC.pickDims(prof.topics.join(' ') + qText) : SC.pickDims(qText));
   const rm = buildReadingMessages(chart, questions, { SCORE_CONTEXT: scoreCtx.text });
   if (ctx.memory) rm[0].content += `\n\n${ctx.memory}`;
-  const r = await streamText(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx });
+  const r = await streamText(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx, onScore: ctx.onScore });
   emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，直接问我就行。' });
   emit('quick', { replies: suggestions(chart) });
   emit('done', { source: r.source });

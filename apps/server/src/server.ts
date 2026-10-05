@@ -84,10 +84,14 @@ async function runChat(req: Request, emit: Emit) {
   let text = '', profile = null, chart = null, score = null;
   const tap: Emit = (e, d) => {
     if (e === 'delta') text += d.text; else if (e === 'text') text += (text ? '\n\n' : '') + d.text;
-    else if (e === 'profile') profile = d.profile; else if (e === 'chart') chart = d.chart; else if (e === 'score') score = d.score;
+    else if (e === 'profile') profile = d.profile; else if (e === 'chart') chart = d.chart;
     emit(e, d);
   };
-  try { await handleChat(body, tap, { memory }); }
+  const onScore = (sc) => { // 评分只留在服务端（日志 + 数据库），绝不下发给客户端
+    score = sc;
+    console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`);
+  };
+  try { await handleChat(body, (e, d) => { if (e !== 'score') tap(e, d); }, { memory, onScore }); }
   catch (e) { console.error(e); tap('error', { error: '大师走神了，请再发一次～' }); tap('done', {}); }
   if (uid && cid) {
     const lastUser = [...(body.messages || [])].reverse().find((m) => m?.role === 'user')?.content;
