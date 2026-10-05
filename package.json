@@ -1,21 +1,20 @@
 {
   "name": "mingpan-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "生辰八字排盘 + AI 命理解读网页（小红书算命）",
-  "main": "server.js",
+  "main": "apps/server/dist/server.js",
   "scripts": {
-    "start": "node server.js",
+    "build": "npm run build -w @mingpan/core && npm run build -w @mingpan/server && npm run build -w @mingpan/web",
+    "start": "node apps/server/dist/server.js",
     "test": "node scripts/test-charts.js",
-    "draft-style": "node scripts/draft-style-guide.js",
-    "screenshot": "node scripts/screenshot.js"
+    "screenshot": "node scripts/screenshot.js",
+    "typecheck": "npm run typecheck -w @mingpan/core && npm run typecheck -w @mingpan/server"
   },
   "license": "UNLICENSED",
-  "dependencies": {
-    "express": "^5.2.1",
-    "lunar-javascript": "^1.7.7"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "playwright-core": "^1.63.0"
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.6.3"
   },
   "private": true,
   "engines": {
@@ -24,5 +23,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/YufeiSun5/mingpan-ai.git"
-  }
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
 }

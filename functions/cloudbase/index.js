@@ -1,8 +1,8 @@
 // 腾讯云 CloudBase 云函数入口（通过「HTTP 访问服务」触发）。
 // 部署时把整个项目（含 lib/ prompts/ style/ node_modules）作为函数代码上传，入口 functions/cloudbase/index.main
-const { handleReading, handleChart } = require('../../lib/handler');
-const rateLimit = require('../../lib/ratelimit');
-const { handleChat } = require('../../lib/chat');
+const { handleReading, handleChart } = require('../../apps/server/dist/handler');
+const rateLimit = require('../../apps/server/dist/ratelimit');
+const { handleChat } = require('../../apps/server/dist/chat');
 // 云函数不支持 SSE：聊天接口把事件收集成数组一次性返回 { events: [[event, data], ...] }，前端会自动回放
 const chatCollect = async (b) => { const events = []; await handleChat(b, (e, d) => e !== 'ping' && events.push([e, d])); return { events }; };
 const CORS = { 'Access-Control-Allow-Origin': process.env.CORS_ORIGIN || '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Content-Type': 'application/json; charset=utf-8' };

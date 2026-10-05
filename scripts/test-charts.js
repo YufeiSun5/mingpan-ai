@@ -1,5 +1,5 @@
 // 排盘正确性自测：node scripts/test-charts.js
-const { computeChart } = require('../lib/bazi');
+const { computeChart } = require('../packages/core/dist');
 const cases = [
   { desc: '2000-01-01 12:00 男（题目给定）', in: { gender: '男', year: 2000, month: 1, day: 1, hour: 12 }, expect: '己卯 丙子 戊午 戊午' },
   { desc: '1893-12-26 辰时 男（毛泽东，经典命例）', in: { gender: '男', year: 1893, month: 12, day: 26, shichen: '辰' }, expect: '癸巳 甲子 丁酉 甲辰' },

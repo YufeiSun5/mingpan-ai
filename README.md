@@ -8,58 +8,76 @@
 4. 大模型按"老师的文风"**流式**写详批（命局总论 / 过往验证 / 所问之事 / 未来运势 / 开运建议，每节一个气泡）；
 5. 客户继续追问（"我明年能结婚吗""2019年是不是不顺"），大师基于已排好的命盘 + 流年数据回答（追问里提到的年份会自动补算流年）。
 
-对话记录、待确认信息和命盘资料保存在浏览器 localStorage，每次请求带上最近的对话，服务端无状态（适合云函数）。
+每次回答前，先给出一张**评分卡**：问题健康度（0–100，过度/不健康/不道德的诉求给低分）+ 3–5 个维度（事业/财运/感情/健康/人际/学业）的命盘评分。维度**基准分由程序依据排盘确定性计算**（喜用/忌神 × 流年/大运干支、十神、刑冲合），大模型只能在 ±8 内微调，所以同一命盘多次提问结果一致。诉求明显过度或命盘不支持时，大师会明确说"不行"，并给出具体的八字理由与建设性的替代方向；涉及疾病一律建议遵医嘱；出现自伤/轻生信号时不算命，直接给出心理援助热线（400-161-9995 / 12356）。
 
-- 排盘：[`lunar-javascript`](https://github.com/6tail/lunar-javascript)（6tail 寿星万年历），结果确定、可复现；支持公历/农历（含闰月）、精确时间/时辰/不清楚时辰、常用城市真太阳时校正。
-- 解读：配置了 `MIMO_API_KEY` 时默认用**小米 MiMo `mimo-v2.6-pro`**（MiMo 当前最强模型），否则默认 **DeepSeek**；可切换 **通义千问（DashScope）**、**Gemini**、任意 **OpenAI 兼容接口**；**未配置 Key 时自动使用内置模板生成器**，演示也能完整出结果。
-- 文风：`style/style-guide.md`（语气规则）+ `style/examples/`（往期解读范例，作为 few-shot 注入提示词）。把老师的真实解读放进去，AI 就会模仿她的口吻。
-- 部署：既能 `node server.js` 一体运行，也能拆成「静态前端 + 云函数」。
+服务端有**匿名账户与长期记忆**（PostgreSQL）：出生信息、命盘、对话、结构化事实（自述经历/偏好/问答要点）、对话滚动摘要、长期印象；每用户硬上限 128k tokens，超限时按"已摘要原文 → 最旧摘要并入长期印象 → 问答记录 → 最旧原文"顺序压缩，出生信息与命盘摘要永不删除。
+
+- 排盘：[`lunar-javascript`](https://github.com/6tail/lunar-javascript)（6tail 寿星万年历），支持公历/农历（含闰月）、精确时间/时辰/不清楚时辰、常用城市真太阳时校正。专业盘：主星/副星、藏干十神、星运（十二长生）、自坐、空亡、纳音、神煞（天乙/太极/文昌/天德/月德贵人、禄神、羊刃、金舆、桃花、驿马、华盖、将星、红鸾、天喜、魁罡、空亡）、天干五合/冲、地支六合/三合/半合/三会/六冲/刑/害/破、旺相休囚死、日主旺衰、格局、用喜忌仇闲、命宫/身宫/胎元/胎息、起运/交运。
+- 解读：默认**小米 MiMo `mimo-v2.6-pro`（关闭深度思考）**；可切换 DeepSeek / 通义 / Gemini / 任意 OpenAI 兼容接口；未配置 Key 时自动用内置模板。
+- 文风：`apps/server/style/style-guide.md` + `apps/server/style/examples/`（真人口吻、少表情）。
 
 > 页面底部有"仅供娱乐参考"免责声明，请保留。
 
-## 目录
+## 目录（npm workspaces 单仓）
 
 ```
-public/            聊天前端（index.html / style.css / app.js / config.js / terms.html / robots.txt / manifest / assets/）
-lib/security.js    安全响应头（CSP、HSTS 等）
-lib/chat.js        聊天流程：提取 → 确认 → 排盘 → 流式详批 → 追问
-lib/parse.js       规则版出生信息解析（无 Key 时兜底）
-lib/bazi.js        排盘（四柱、十神、五行旺衰、喜用神、大运、流年、刑冲合）
-lib/cities.js      城市经度表（真太阳时）
-lib/prompt.js      组装提示词（读取 prompts/ 与 style/）
-lib/llm.js         大模型调用层（deepseek / qwen / gemini / openai 兼容）
-lib/fallback.js    无 Key 时的模板解读
-lib/handler.js     与平台无关的业务入口
-prompts/reading.md     ★ 首次详批提示词（可直接改措辞）
-prompts/chat.md        ★ 追问对答提示词
-prompts/extract.md     出生信息提取提示词（输出 JSON）
-prompts/style-draft.md 起草文风指南用的提示词
-style/style-guide.md   ★ 文风指南
-style/examples/        ★ 往期解读范例（.md/.txt，按文件名排序取前 3 篇）
-scripts/draft-style-guide.js  从聊天记录/解读文本自动起草文风指南
-scripts/test-charts.js        排盘正确性自测
-scripts/screenshot.js         聊天界面手机截图（走真实后端，顺带检查外部请求/CSP 报错）
-scripts/make-icons.js         由 SVG 生成 PNG 图标与 og 分享图
-scripts/chat-demo.js          端到端聊天演示，输出 samples/chat-transcript.md
-scripts/gen-samples.js        生成两份样例详批到 samples/
-functions/cloudbase/   腾讯云 CloudBase 云函数入口
-functions/aliyun-fc/   阿里云函数计算（事件函数）入口
-server.js / Dockerfile 一体化运行 / 容器部署（云托管、FC Web 函数）
+packages/core/        平台无关（无 DOM / Node 专属 API），Web、小程序、服务端共用
+  src/bazi.ts pro.ts    排盘引擎 + 专业盘（神煞、干支关系、格局、宫位…）
+  src/score.ts          问题健康度规则 + 维度确定性基准分 + 评分卡校验
+  src/parse.ts fallback.ts cities.ts
+  src/types.ts          共享类型（Chart / ScoreCard / ChatEvent …）
+  src/client.ts sse.ts  API 客户端（传输层可插拔：fetch 流 / wx.request）+ 增量 SSE 解析
+  src/chatState.ts text.ts  聊天状态机（纯函数）、气泡切分、轻量 Markdown 块
+  src/browser.ts        前端轻量入口（不含排盘引擎）
+apps/server/          TypeScript 后端（Express）
+  src/server.ts         路由：/api/v1/*（Bearer token）、旧版 /api/chat 兼容、静态托管 apps/web/dist
+  src/chat.ts           聊天流程：危机识别 → 提取 → 确认 → 排盘 → 评分卡 + 流式详批 → 追问
+  src/memory.ts         记忆：事实 / 滚动摘要 / 长期印象 / 128k 预算 / 上下文组装
+  src/store/            存储接口 + PostgreSQL 实现（pg.ts，含迁移）+ 内存实现（开发用）
+  src/identity.ts       匿名签名 token（Cookie + Authorization 头）、管理员鉴权
+  src/llm.ts prompt.ts security.ts ratelimit.ts
+  prompts/  style/      提示词与文风
+apps/web/             React + TypeScript + Vite（构建为同源静态资源，无外部 CDN，严格 CSP）
+  src/hooks/            useChat（数据逻辑）、useSmartScroll（智能滚动）
+  src/components/       纯展示组件：Chat / ChartCard / ScoreCard / Composer …
+deploy/               服务器部署脚本（Postgres 容器、备份 cron）
+scripts/              排盘自测、截图、演示
+functions/            云函数入口（旧，需先 npm run build）
 ```
 
 ## 本地运行
 
 ```bash
 npm install
-cp .env.example .env     # 填入 DEEPSEEK_API_KEY（不填则用模板解读）
-npm start                # 打开 http://localhost:3000
-npm test                 # 排盘自测（4 个已知命例）
+cp .env.example .env     # MIMO_API_KEY；可选 DATABASE_URL（不填则用内存存储）、SESSION_SECRET、ADMIN_TOKEN
+npm run build            # core → server → web
+npm start                # http://localhost:3000
+npm run dev -w @mingpan/web   # 前端热更新（代理 /api 到 3000）
+npm test                 # 排盘自测
 ```
 
-## 接口
-- `POST /api/chat`（主接口，SSE 流式）：请求 `{ messages:[{role,content}], pending, profile, action }`；事件 `text`（整条气泡）、`delta`（流式片段）、`bubble`（开始新一段流式回答）、`chart`（命盘数据）、`pending`（待确认信息）、`profile`（已确认资料）、`quick`（快捷回复）、`done`、`error`。
-- 云函数不支持 SSE 时，同一接口返回 `{ events:[[event,data],...] }`，前端自动逐条回放（体验上是一次性出现）。想要真正的流式效果，请用「云托管」或「FC Web 函数」运行 `server.js`。
-- `POST /api/reading`、`POST /api/chart`：旧的表单式接口，保留可用。
+## 接口（v1）
+
+鉴权：`POST /api/v1/session` 返回 `{ uid, token }`；之后在请求头带 `Authorization: Bearer <token>`（Web 同时写 HttpOnly Cookie；小程序不依赖 Cookie）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/chat` | SSE 流式。请求 `{ cid, messages, pending, profile, action, nowYear }`；事件 `text/delta/bubble/chart/score/pending/profile/quick/crisis/error/done` |
+| POST | `/api/v1/chat?stream=0` | 非流式：一次返回 `{ events: [[event, data], …] }` |
+| POST | `/api/v1/chat?mode=poll` → GET `/api/v1/chat/jobs/:id?after=n` | 轮询模式（小程序 `wx.request` 不支持流式时）：返回增量事件、`next`、`done` |
+| POST | `/api/v1/auth/wechat` | 小程序登录占位：`{ code }` → code2session → 绑定用户（需 `WECHAT_APPID/SECRET`） |
+| GET / DELETE | `/api/v1/me` | 我的数据概览 / 删除我的全部数据 |
+| GET | `/api/v1/me/export` | 下载我的全部数据（JSON） |
+| POST | `/api/v1/me/migrate` | 旧版浏览器本地历史迁移到服务端（首次访问自动调用） |
+| GET / DELETE | `/api/v1/admin/users[/:id]` | 管理（`Authorization: Bearer $ADMIN_TOKEN`；未配置时 404） |
+| GET | `/api/health` | 健康检查 |
+
+## 小程序规划（暂未开发）
+
+- **框架**：推荐 **Taro（React）**。`packages/core` 无 DOM/Node 依赖，可直接复用排盘、评分、状态机与 API 客户端；Web 端的展示组件只收数据和回调，迁移时把 `div/span` 换成 Taro 的 `View/Text`，`useChat` 换一个 `wx.request` 传输层即可。
+- **传输**：基础库支持时用 `wx.request({ enableChunked: true })` + `onChunkReceived` 喂给 `SSEParser`；否则用 `?mode=poll` 轮询或 `?stream=0` 一次性返回。
+- **登录**：`wx.login` 拿 `code` → `POST /api/v1/auth/wechat`（服务端 code2session 换 openid，已留接口）→ 返回 token，存 `wx.setStorageSync`，请求头带 `Authorization`。
+- **类目与审核风险**：命理/算命类内容在微信小程序属于**高风险、通常不予通过**的类目（"占卜、算命、风水"被明确限制）。建议定位为"传统文化 / 国学知识 / 万年历工具"，弱化"算命"字样，突出排盘工具与文化科普；AI 生成内容还需按《生成式人工智能服务管理暂行办法》做算法备案/安全评估，或接入已备案的大模型服务并在页面标注"AI 生成"。主体需企业资质，个人主体能选的类目很有限。
 
 ## 配置大模型
 
@@ -86,8 +104,8 @@ npm test                 # 排盘自测（4 个已知命例）
    ```bash
    npm run draft-style -- ./我的聊天记录
    ```
-   会生成 `style/style-guide.draft.md`（自动把手机号打码），人工检查修改后改名为 `style/style-guide.md` 即生效。
-3. **改提示词结构**：直接编辑 `prompts/reading.md`（五个小标题、字数、禁忌都在里面）。改完无需重新构建，重启服务即可（云函数需重新上传）。
+   会生成 `apps/server/style/style-guide.draft.md`（自动把手机号打码），人工检查修改后改名为 `apps/server/style/style-guide.md` 即生效。
+3. **改提示词结构**：直接编辑 `apps/server/prompts/reading.md`（五个小标题、字数、禁忌都在里面）。改完无需重新构建，重启服务即可（云函数需重新上传）。
 
 ## 部署
 

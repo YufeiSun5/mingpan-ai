@@ -1,3 +1,9 @@
 node_modules
-screenshots
+**/node_modules
+**/dist
 .env
+.git
+screenshots
+samples
+data
+*.log

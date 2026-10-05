@@ -2,11 +2,11 @@
 // 用法：node scripts/draft-style-guide.js <文件夹> [输出文件]
 // 读取文件夹（含子目录）里所有 .txt/.md，交给大模型总结文风，输出到 style/style-guide.draft.md（不会覆盖正式文件）。
 // 需要先配置 LLM（如 DEEPSEEK_API_KEY）。
-require('../lib/env');
+require('../apps/server/dist/env');
 const fs = require('fs');
 const path = require('path');
-const { chat, getProvider } = require('../lib/llm');
-const { readTemplate, fill } = require('../lib/prompt');
+const { chat, getProvider } = require('../apps/server/dist/llm');
+const { readTemplate, fill } = require('../apps/server/dist/prompt');
 
 const dir = process.argv[2];
 const out = process.argv[3] || path.join(__dirname, '..', 'style', 'style-guide.draft.md');

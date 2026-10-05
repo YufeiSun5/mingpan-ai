@@ -1,9 +1,9 @@
 // 用真实大模型生成样例解读：node scripts/gen-samples.js  → samples/*.md
-require('../lib/env');
+require('../apps/server/dist/env');
 const fs = require('fs'); const path = require('path');
-const { handleReading } = require('../lib/handler');
-const { getLastUsage } = require('../lib/llm');
-const { chartToText } = require('../lib/prompt');
+const { handleReading } = require('../apps/server/dist/handler');
+const { getLastUsage } = require('../apps/server/dist/llm');
+const { chartToText } = require('../apps/server/dist/prompt');
 const cases = [
   { file: '2000-01-01-男-事业财运', body: { name: '阿杰', gender: '男', year: 2000, month: 1, day: 1, hour: 12, minute: 0, topics: ['事业', '财运'] } },
   { file: '农历1995-08-15-辰时-女-感情', body: { name: '小鱼', gender: '女', calendar: 'lunar', year: 1995, month: 8, day: 15, shichen: '辰', topics: ['感情'] } },

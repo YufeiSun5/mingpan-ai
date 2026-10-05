@@ -5,3 +5,7 @@ node_modules/
 *.log
 style/style-guide.draft.md
 .DS_Store
+data/
+dist/
+**/dist/
+apps/server/style/style-guide.draft.md
