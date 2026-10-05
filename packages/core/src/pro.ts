@@ -171,4 +171,4 @@ function proText(pro) {
   return L.join('\n');
 }
 
-export { buildPro, proText, changSheng };
+export { buildPro, proText, changSheng, GAN_HE, GAN_CHONG, LIU_HE, SAN_HE, LIU_CHONG, HAI, PO, XING3, pairHas, pairKey };

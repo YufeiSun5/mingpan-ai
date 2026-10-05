@@ -62,14 +62,19 @@ npm test                 # 排盘自测
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| POST | `/api/v1/chat` | SSE 流式。请求 `{ cid, messages, pending, profile, nowYear, ui }`（`ui:'card'` 时信息齐全只返回 `pending`，由前端确认卡片调用 `/api/v1/profiles`）；事件 `text/delta/bubble/chart/pending/profile/quick/crisis/error/done` |
+| POST | `/api/v1/chat` | SSE 流式。请求 `{ cid, messages, pending, profile, nowYear, ui }`（`ui:'card'` 时信息齐全只返回 `pending`，由前端确认卡片调用 `/api/v1/profiles`；`profileId` 指定当前命主。已排盘后服务端识别：更正生辰 → `pending.correction`（预填更正卡片，按钮走 PATCH）；想看另一个人 → `pending.newPerson`（带称呼的新卡片）或 `switch`（已有档案）；合盘 → `compat` 事件 + 解读）；事件 `text/delta/bubble/chart/pending/profile/switch/compat/quick/crisis/error/done` |
 | POST | `/api/v1/chat?stream=0` | 非流式：一次返回 `{ events: [[event, data], …] }` |
 | POST | `/api/v1/chat?mode=poll` → GET `/api/v1/jobs/:id?after=n`（别名 `/api/v1/chat/jobs/:id`） | 轮询模式（小程序 `wx.request` 不支持流式时）：返回增量事件、`next`、`done` |
-| POST | `/api/v1/conversations` | 新排盘：新建对话，返回 `{ cid }` |
-| GET | `/api/v1/profiles` | 我的生辰档案列表 |
-| POST | `/api/v1/profiles` | 确认生辰（软件操作，不是聊天消息）：`{ profile, cid, nowYear }` → 校验（含大小月 / 闰月）+ 排盘 + 存档 → `{ profile:{…,id}, chart, intro }`；校验失败 422 `{ error }`。服务端在对话记忆里记一条 system 事件「用户确认了生辰信息：…」 |
-| PATCH | `/api/v1/profiles/:id` | 修改生辰并重新排盘，同上（事件「用户修改并确认了生辰信息：…」） |
-| POST | `/api/v1/profiles/:id/reading` | 详批流式：`{ cid, nowYear, messages }`；SSE / `?stream=0` / `?mode=poll`，事件同 chat |
+| POST | `/api/v1/conversations` | 添加命主 / 新对话：返回 `{ cid }` |
+| GET | `/api/v1/conversations/:cid/messages` | 对话原文（换设备、切换命主时重建聊天记录；不含 system 事件） |
+| GET | `/api/v1/profiles` | 命主列表：`{ id, label（我/老公/妈妈…）, name, data, cid（该命主的对话）, version, bazi }` |
+| GET | `/api/v1/profiles/:id` | 命主详情：生辰、按当前年份重排的命盘、历史版本 |
+| GET | `/api/v1/profiles/:id/versions` | 生辰历史版本（更正前的旧盘，保留用于对比） |
+| DELETE | `/api/v1/profiles/:id` | 删除命主（连同其对话与记忆） |
+| POST | `/api/v1/compat` | 合盘：`{ a, b, question, cid }`（两位命主 id），SSE / `?stream=0` / `?mode=poll`；两人关系（日干合冲生克、年支生肖与日支夫妻宫的合冲刑害、五行互补）由程序计算 |
+| POST | `/api/v1/profiles` | 确认生辰（软件操作，不是聊天消息）：`{ profile（含 label）, cid, nowYear }` → 校验（含大小月 / 闰月）+ 排盘 + 建档 → `{ profile:{…,id,label}, chart, intro, cid, switched }`；当前对话已属于别的命主时为新命主单独开对话（`switched:true` 与新 `cid`）；校验失败 422 `{ error }`。服务端在对话记忆里记一条 system 事件「用户确认了生辰信息：…」 |
+| PATCH | `/api/v1/profiles/:id` | `{ profile }` 更正生辰：重排、记一个历史版本，返回 `{ …, recast, version, previous, intro }`，intro 含程序计算的新旧盘差异（四柱 / 日主 / 格局 / 喜用 / 大运）；旧盘结论在记忆里标记作废。`{ label, name }` 只改称呼不重排 |
+| POST | `/api/v1/profiles/:id/reading` | 详批流式：`{ cid, nowYear, messages, recast }`；SSE / `?stream=0` / `?mode=poll`，事件同 chat |
 | POST | `/api/v1/auth/wechat` | 小程序登录占位：`{ code }` → code2session → 绑定用户（需 `WECHAT_APPID/SECRET`） |
 | GET / DELETE | `/api/v1/me` | 我的数据概览 / 删除我的全部数据 |
 | GET | `/api/v1/me/export` | 下载我的全部数据（JSON） |

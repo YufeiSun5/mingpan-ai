@@ -11,3 +11,6 @@ export { generateFallback } from './fallback';
 export { default as CITIES } from './cities';
 import * as SC from './score';
 export { SC };
+export * from './diff';
+export { compatRelations, briefBazi } from './compat';
+export type { CompatResult } from './compat';

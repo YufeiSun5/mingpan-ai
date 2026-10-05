@@ -1,5 +1,6 @@
 // API 客户端：传输层可插拔（Web 用 fetch 流；小程序用 wx.request + enableChunked 或非流式）
-import type { Chart, ChatEvent, ChatRequest, Profile } from './types';
+import type { Chart, ChatEvent, ChatRequest, Profile, ProfileSummary } from './types';
+import type { ProfileResult } from './chatState';
 import { SSEParser } from './sse';
 
 export interface TransportRequest { url: string; method: 'GET' | 'POST' | 'PATCH' | 'DELETE'; headers: Record<string, string>; body?: string }
@@ -71,7 +72,6 @@ export function createClient(opts: ClientOptions) {
     if (!finished) throw new ApiError('incomplete');
   }
   const chat = (req: ChatRequest, onEvent: (e: ChatEvent) => void, mode: Mode = 'auto') => events('/api/v1/chat', req, onEvent, mode);
-  type ProfileResult = { profile: Profile & { id: string }; chart: Chart; intro: string };
 
   return {
     chat,
@@ -87,10 +87,23 @@ export function createClient(opts: ClientOptions) {
     createProfile: (profile: Profile, cid?: string, nowYear?: number) => json<ProfileResult>('POST', '/api/v1/profiles', { profile, cid, nowYear }),
     /** 修改生辰（PATCH），返回新的命盘 */
     updateProfile: (id: string, profile: Partial<Profile>, cid?: string, nowYear?: number) => json<ProfileResult>('PATCH', `/api/v1/profiles/${encodeURIComponent(id)}`, { profile, cid, nowYear }),
-    listProfiles: () => json<{ profiles: { id: string; data: Profile; updatedAt: string }[] }>('GET', '/api/v1/profiles'),
-    /** 详批（流式 / json / poll） */
-    reading: (id: string, body: { cid?: string; nowYear?: number; messages?: ChatRequest['messages'] }, onEvent: (e: ChatEvent) => void, mode: Mode = 'auto') =>
+    /** 命主列表（含称呼、简要八字、所属对话 cid） */
+    listProfiles: () => json<{ profiles: ProfileSummary[] }>('GET', '/api/v1/profiles'),
+    /** 命主详情：生辰、按当前年份重排的命盘、历史版本 */
+    getProfile: (id: string, nowYear?: number) => json<ProfileSummary & { profile: Profile; chart: Chart; versions: { version: number; data: Profile; bazi: string; createdAt: string }[] }>('GET', `/api/v1/profiles/${encodeURIComponent(id)}${nowYear ? `?nowYear=${nowYear}` : ''}`),
+    /** 改称呼 / 名字（不重排） */
+    renameProfile: (id: string, label: string, name?: string) => json<ProfileSummary>('PATCH', `/api/v1/profiles/${encodeURIComponent(id)}`, { label, name }),
+    /** 删除命主（连同其对话与记忆） */
+    deleteProfile: (id: string) => json<{ ok: boolean }>('DELETE', `/api/v1/profiles/${encodeURIComponent(id)}`),
+    /** 生辰历史版本（更正前的旧盘） */
+    versions: (id: string) => json<{ versions: { version: number; data: Profile; bazi: string; createdAt: string }[] }>('GET', `/api/v1/profiles/${encodeURIComponent(id)}/versions`),
+    /** 对话原文（重建聊天记录用） */
+    messages: (cid: string) => json<{ cid: string; profileId: string | null; messages: { role: string; content: string; createdAt: string }[] }>('GET', `/api/v1/conversations/${encodeURIComponent(cid)}/messages`),
+    /** 详批（流式 / json / poll）；recast＝更正生辰后的重新解读 */
+    reading: (id: string, body: { cid?: string; nowYear?: number; messages?: ChatRequest['messages']; recast?: boolean }, onEvent: (e: ChatEvent) => void, mode: Mode = 'auto') =>
       events(`/api/v1/profiles/${encodeURIComponent(id)}/reading`, body, onEvent, mode),
+    /** 合盘（两位已有命主），事件同 chat */
+    compat: (body: { a: string; b: string; question?: string; cid?: string; nowYear?: number }, onEvent: (e: ChatEvent) => void, mode: Mode = 'auto') => events('/api/v1/compat', body, onEvent, mode),
   };
 }
 export type ApiClient = ReturnType<typeof createClient>;

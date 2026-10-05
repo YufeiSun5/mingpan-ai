@@ -1,19 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { GREETINGS, type ChatItem, type Chart, type Profile } from '@mingpan/core';
 import { useChat } from './hooks/useChat';
 import { useSmartScroll } from './hooks/useSmartScroll';
 import { Item, Streaming, Typing, QuickReplies } from './components/Chat';
 import { Composer } from './components/Composer';
 import { ChartCard } from './components/ChartCard';
+import { ProfileSheet } from './components/ProfileSheet';
 
 export function App() {
-  const { state, busy, send, reset, confirmProfile } = useChat();
+  const { state, busy, send, confirmProfile, profiles, switchTo, addNew, renameProfile, removeProfile } = useChat();
+  const [sheet, setSheet] = useState(false);
   const { ref, showJump, onContent, jump } = useSmartScroll();
-  const [armed, setArmed] = useState(false);
-  const armTimer = useRef<number>();
-  const greeting = useMemo<ChatItem[]>(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)].map((text) => ({ type: 'bot', text })), [state.cid]);
+  const greeting = useMemo<ChatItem[]>(() => (profiles.length && !state.profileId
+    ? [{ type: 'bot', text: '好，再排一位。这次是给谁看呀？' }, { type: 'bot', text: '把TA的**出生年月日、时辰、性别**发我，顺便说一声是你的谁（比如老公、妈妈、朋友），我单独给TA建一份命盘，跟之前的分开放。' }]
+    : GREETINGS[Math.floor(Math.random() * GREETINGS.length)].map((text) => ({ type: 'bot', text }))) as ChatItem[], [state.cid, profiles.length > 0, state.profileId]);
   const items = state.items.length ? state.items : greeting;
-  const latestChart = useMemo(() => [...state.items].reverse().find((x) => x.type === 'chart') as { chart: Chart } | undefined, [state.items]);
+  const latestChart = useMemo(() => [...state.items].reverse().find((x) => x.type === 'chart' && !x.stale) as { chart: Chart } | undefined, [state.items]);
   const lastIsBot = items.length > 0 && items[items.length - 1].type !== 'user';
 
   useEffect(() => { onContent(); }, [state.items.length, state.stream, busy, onContent]);
@@ -25,20 +27,18 @@ export function App() {
   const editingCard = state.items.some((x) => x.type === 'confirm' && x.status === 'editing');
   // 只有最近一张已确认的卡片可以修改（更早的生辰卡片只读）
   const lastConfirmIdx = useMemo(() => { let k = -1; state.items.forEach((x, i) => { if (x.type === 'confirm' && x.status === 'confirmed') k = i; }); return k; }, [state.items]);
-  const onReset = () => {
-    if (busy) return;
-    const trivial = !state.profile && state.items.length === 0;
-    if (!trivial && !armed) { setArmed(true); armTimer.current = window.setTimeout(() => setArmed(false), 3000); return; }
-    clearTimeout(armTimer.current); setArmed(false); reset();
-  };
-
+  const onSwitch = useCallback(async (pid: string) => { setSheet(false); await switchTo(pid); onContent(true); }, [switchTo, onContent]);
+  const onAdd = async () => { setSheet(false); await addNew(); onContent(true); };
+  const who = state.profileId ? (state.label || '我') : '新命主';
   return (
     <div className={`shell${latestChart ? ' has-chart' : ''}`}>
       <div className="app">
         <header className="bar">
           <img className="avatar lg" src="/assets/logo.svg" alt="玄真" width={38} height={38} />
           <div className="who"><b>玄真大师</b><span><i className="dot" />在线 · 传统文化 · 生辰解读</span></div>
-          <button className={`reset${armed ? ' warn' : ''}`} type="button" onClick={onReset}>{armed ? '确定清空？' : '新排盘'}</button>
+          <button className="who-btn" type="button" aria-haspopup="dialog" aria-expanded={sheet} disabled={busy} onClick={() => setSheet(true)}>
+            <span className="pf-av sm">{who === '新命主' ? '＋' : who.slice(0, 1)}</span><span className="who-l">{who}</span><span className="caret-d" aria-hidden="true">▾</span>
+          </button>
         </header>
         <main className="list" ref={ref as React.RefObject<HTMLElement>} aria-live="polite" tabIndex={-1}>
           <section className="hero">
@@ -47,7 +47,7 @@ export function App() {
             <p>以传统历法排四柱 · 观五行大运流年</p>
             <div className="hero-rule"><i /><span>仅供娱乐参考</span><i /></div>
           </section>
-          {items.map((it, i) => <Item key={i} it={it} cont={i > 0 && items[i - 1].type !== 'user' && it.type !== 'user'} busy={busy} locked={it.type === 'confirm' && it.status === 'confirmed' && i !== lastConfirmIdx} onConfirm={onConfirm} />)}
+          {items.map((it, i) => <Item key={i} it={it} cont={i > 0 && items[i - 1].type !== 'user' && it.type !== 'user'} busy={busy} locked={it.type === 'confirm' && it.status === 'confirmed' && i !== lastConfirmIdx} onConfirm={onConfirm} onSwitch={onSwitch} />)}
           {state.stream !== null && <Streaming text={state.stream} cont={lastIsBot} />}
           {busy && state.stream === null && <Typing cont={lastIsBot} />}
         </main>
@@ -56,6 +56,7 @@ export function App() {
         <Composer disabled={busy} onSend={onSend} />
         <footer className="foot"><a href="/terms.html">用户协议与隐私说明</a> · 内容由 AI 基于传统文化生成，仅供娱乐参考</footer>
       </div>
+      <ProfileSheet open={sheet} profiles={profiles} activeId={state.profileId} draft={!state.profileId} busy={busy} onClose={() => setSheet(false)} onPick={onSwitch} onAdd={onAdd} onRename={renameProfile} onDelete={removeProfile} />
       {latestChart && <aside className="side" aria-label="命盘"><div className="side-in"><div className="card side-card"><ChartCard c={latestChart.chart} open /></div></div></aside>}
     </div>
   );

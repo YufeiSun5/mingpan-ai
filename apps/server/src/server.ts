@@ -5,13 +5,14 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { handleReading, handleChart } from './handler';
-import { handleChat, runReading, validateProfile, profileLine, readingIntro, sanitize } from './chat';
+import { handleChat, runReading, runCompat, validateProfile, profileLine, readingIntro, sanitize, whoOf } from './chat';
+import { chartDiffText, changeSentence, briefBazi, timeKey } from '@mingpan/core';
 import { getProvider } from './llm';
 import * as rateLimit from './ratelimit';
 import { securityHeaders } from './security';
 import { getStore } from './store';
 import { identify, makeToken, newUid, setCookie, clearCookie, isAdmin, verifyToken } from './identity';
-import { memoryContext, recordTurn, enforceBudget, recordProfileEvent } from './memory';
+import { memoryContext, recordTurn, enforceBudget, recordProfileEvent, forgetProfile } from './memory';
 
 const app = express();
 app.disable('x-powered-by');
@@ -79,8 +80,17 @@ async function runChat(req: Request, emit: Emit) {
   const body = req.body || {};
   const uid = identify(req);
   const cid = typeof body.cid === 'string' && CID_RE.test(body.cid) ? body.cid : null;
-  let memory = '';
-  if (uid && cid) { await store.ensureUser(uid); memory = await memoryContext(uid, cid).catch(() => ''); }
+  let memory = '', current = null, profiles = [];
+  if (uid) {
+    await store.ensureUser(uid);
+    profiles = (await store.getProfiles(uid).catch(() => [])).map((p) => ({ id: p.id, label: p.label || '我', data: p.data, cid: p.cid }));
+    // 当前命主：客户端给的 profileId（或旧版 profile.id），否则看这个对话绑定的命主
+    const pidWanted = typeof body.profileId === 'string' ? body.profileId : typeof body.profile?.id === 'string' ? body.profile.id : null;
+    const bound = cid ? await store.conversationProfile(uid, cid).catch(() => null) : null;
+    current = profiles.find((p) => p.id === (bound || pidWanted)) || null;
+    if (current && cid && !bound && !current.cid) await store.bindConversation(uid, current.id, cid).catch(() => {}); // 旧版档案：首次使用时绑定到当前对话
+    if (cid) memory = await memoryContext(uid, cid, current?.id).catch(() => '');
+  }
   // 收集本轮产出，结束后写入记忆
   let text = '', profile = null, chart = null, score = null;
   const tap: Emit = (e, d) => {
@@ -92,11 +102,11 @@ async function runChat(req: Request, emit: Emit) {
     score = sc;
     console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`);
   };
-  try { await handleChat(body, (e, d) => { if (e !== 'score') tap(e, d); }, { memory, onScore }); }
+  try { await handleChat(body, (e, d) => { if (e !== 'score') tap(e, d); }, { memory, onScore, current, profiles }); }
   catch (e) { console.error(e); tap('error', { error: '大师走神了，请再发一次～' }); tap('done', {}); }
   if (uid && cid) {
     const lastUser = [...(body.messages || [])].reverse().find((m) => m?.role === 'user')?.content;
-    recordTurn(uid, cid, { user: typeof lastUser === 'string' ? lastUser.slice(0, 500) : undefined, assistant: text, profile, chart, score })
+    recordTurn(uid, cid, { user: typeof lastUser === 'string' ? lastUser.slice(0, 500) : undefined, assistant: text, profile, chart, score, pid: current?.id })
       .catch((e) => console.error('[memory] record', e.message));
   }
 }
@@ -141,53 +151,140 @@ app.get(['/api/v1/jobs/:id', '/api/v1/chat/jobs/:id'], (req, res) => {
 // ---------- 对话 / 生辰档案（确认排盘是软件操作，不是聊天消息） ----------
 const optCid = (v: any) => (typeof v === 'string' && CID_RE.test(v) ? v : null);
 const nowYearOf = (b: any) => (+b?.nowYear >= 1900 && +b?.nowYear <= 2200 ? +b.nowYear : new Date().getFullYear());
-const birthKey = (p: any) => [p.gender, p.calendar, p.year, p.month, p.day, p.leap ? 1 : 0, JSON.stringify(p.time || null), p.city || ''].join('|');
+const birthKey = (p: any) => [p.gender, p.calendar || 'solar', p.year, p.month, p.day, p.leap ? 1 : 0, timeKey(p.time), p.city || ''].join('|');
+
+const newConvId = () => crypto.randomBytes(12).toString('base64url');
+const cleanLabel = (v: any) => (typeof v === 'string' ? v.trim().replace(/[<>]/g, '').slice(0, 8) : '');
+const summaryOf = (p: any) => ({ id: p.id, label: p.label || '我', name: p.data?.name || '', data: { ...p.data, label: p.label || '我', id: p.id }, cid: p.cid, version: p.version, bazi: p.chart ? briefBazi(p.chart) : '', updatedAt: p.updatedAt });
 
 app.post('/api/v1/conversations', light, wrap(async (req) => {
   const uid = needUser(req); await store.ensureUser(uid);
-  const cid = crypto.randomBytes(12).toString('base64url');
+  const cid = newConvId();
   await store.ensureConversation(uid, cid);
   return { cid };
 }));
-app.get('/api/v1/profiles', wrap(async (req) => ({ profiles: await store.getProfiles(needUser(req)) })));
+// 对话原文（换设备 / 切换命主时重建聊天记录）；system 事件不展示给用户
+app.get('/api/v1/conversations/:cid/messages', wrap(async (req) => {
+  const uid = needUser(req); const cid = String(req.params.cid);
+  if (!CID_RE.test(cid)) throw Object.assign(new Error('对话不存在'), { status: 404 });
+  const msgs = await store.getMessages(uid, cid);
+  return { cid, profileId: await store.conversationProfile(uid, cid), messages: msgs.filter((m) => m.role !== 'system').slice(-120).map((m) => ({ role: m.role, content: m.content, createdAt: m.createdAt })) };
+}));
+app.get('/api/v1/profiles', wrap(async (req) => ({ profiles: (await store.getProfiles(needUser(req))).map(summaryOf) })));
+app.get('/api/v1/profiles/:id', wrap(async (req) => {
+  const uid = needUser(req);
+  const p = await store.getProfile(uid, String(req.params.id)); if (!p) throw Object.assign(new Error('档案不存在'), { status: 404 });
+  const v = validateProfile(p.data, nowYearOf(req.query));
+  const versions = (await store.getVersions(uid, p.id)).map((x) => ({ version: x.version, data: x.data, bazi: x.chart ? briefBazi(x.chart) : '', createdAt: x.createdAt }));
+  return { ...summaryOf(p), profile: { ...p.data, id: p.id, label: p.label || '我' }, chart: v.chart || p.chart, versions };
+}));
+// 确认生辰（软件操作）：校验 → 排盘 → 建档。当前对话已属于别的命主时，为新命主单独开一个对话（返回新的 cid）
 app.post('/api/v1/profiles', smallJson, light, wrap(async (req, res) => {
   const uid = needUser(req); await store.ensureUser(uid);
-  const v = validateProfile(req.body?.profile, nowYearOf(req.body));
+  const raw = req.body?.profile || {};
+  const v = validateProfile(raw, nowYearOf(req.body));
   if (v.error) { res.status(422); return { error: v.error }; }
-  const id = await store.saveProfile(uid, birthKey(v.profile), v.profile, v.chart);
-  await recordProfileEvent(uid, optCid(req.body?.cid), v.profile, v.chart, `用户确认了生辰信息：${profileLine(v.profile)}`);
-  console.log(`[profile] create ${uid} ${id}`);
-  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart) };
+  const all = await store.getProfiles(uid);
+  const label = cleanLabel(raw.label) || (all.some((p) => (p.label || '我') === '我') ? '' : '我');
+  if (!label) { res.status(422); return { error: '请填一下这是谁的盘（比如 老公、妈妈、朋友）' }; }
+  const data = { ...v.profile, label }; delete data.newPerson; delete data.correction;
+  const cid = optCid(req.body?.cid);
+  const bound = cid ? await store.conversationProfile(uid, cid) : null;
+  let prof = await store.findProfile(uid, birthKey(data), label);
+  let targetCid: string;
+  if (prof) { // 重复确认同一个人：沿用原档案与原对话
+    targetCid = prof.cid || (cid && (!bound || bound === prof.id) ? cid : newConvId());
+    if (!prof.cid) await store.bindConversation(uid, prof.id, targetCid);
+  } else {
+    targetCid = cid && !bound ? cid : newConvId();
+    prof = await store.createProfile(uid, { birthKey: birthKey(data), data, chart: v.chart, label, cid: targetCid });
+  }
+  const line = profileLine(data);
+  await recordProfileEvent(uid, targetCid, prof.id, data, v.chart, `用户确认了生辰信息（命主：${label === '我' ? '本人' : label}）：${line}`, { label });
+  if (cid && targetCid !== cid) await recordProfileEvent(uid, cid, bound, null, null, `用户为「${label}」新建了单独的命盘档案（在另一个对话里解读；这里不要混用两人的命盘）`).catch(() => {});
+  console.log(`[profile] create ${uid} ${prof.id} label=${label} cid=${targetCid}${targetCid !== cid ? ' (new conversation)' : ''}`);
+  const intro = label === '我' ? readingIntro(data, v.chart) : readingIntro(data, v.chart).replace('你的盘排出来了，你先看看', `${whoOf(label)}的盘排出来了，你先看看`);
+  return { profile: { ...data, id: prof.id, label }, chart: v.chart, intro, cid: targetCid, switched: !!cid && targetCid !== cid };
 }));
+// 改称呼（不重排）或更正生辰（重排 + 记一个历史版本 + 程序计算的新旧盘差异）
 app.patch('/api/v1/profiles/:id', smallJson, light, wrap(async (req, res) => {
   const uid = needUser(req);
   const cur = await store.getProfile(uid, String(req.params.id));
   if (!cur) { res.status(404); return { error: '档案不存在' }; }
-  const patch = req.body?.profile || {};
-  const v = validateProfile({ ...cur.data, ...patch, time: patch.time || cur.data.time }, nowYearOf(req.body));
+  if (!req.body?.profile) {
+    const label = cleanLabel(req.body?.label) || cur.label || '我';
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 12) : undefined;
+    await store.renameProfile(uid, cur.id, label, name);
+    const m = await store.getMemory(uid); if (m.facts?.profiles?.[cur.id]) { m.facts.profiles[cur.id].label = label; await store.saveMemory(uid, m); }
+    return summaryOf({ ...cur, label, data: name === undefined ? cur.data : { ...cur.data, name } });
+  }
+  const patch = req.body.profile || {};
+  const nowYear = nowYearOf(req.body);
+  const v = validateProfile({ ...cur.data, ...patch, time: patch.time || cur.data.time }, nowYear);
   if (v.error) { res.status(422); return { error: v.error }; }
-  const id = await store.updateProfile(uid, cur.id, birthKey(v.profile), v.profile, v.chart);
-  await recordProfileEvent(uid, optCid(req.body?.cid), v.profile, v.chart, `用户修改并确认了生辰信息：${profileLine(v.profile)}`);
-  console.log(`[profile] update ${uid} ${id}`);
-  return { profile: { ...v.profile, id }, chart: v.chart, intro: readingIntro(v.profile, v.chart, true) };
+  const label = cur.label || '我';
+  const data = { ...v.profile, label }; delete data.newPerson; delete data.correction;
+  const prev = validateProfile(cur.data, nowYear);
+  const prevChart = prev.chart || cur.chart;
+  const same = birthKey(data) === birthKey(cur.data);
+  if (!same) await store.updateProfile(uid, cur.id, birthKey(data), data, v.chart);
+  const cid = optCid(req.body?.cid) || cur.cid;
+  const oldLine = profileLine(cur.data), newLine = profileLine(data);
+  await recordProfileEvent(uid, cid, cur.id, data, v.chart, same ? `用户核对了生辰信息（无变化）：${newLine}` : `用户更正了生辰信息：${oldLine} → ${newLine}。旧盘及基于旧盘的结论作废，以新盘为准。`,
+    { label, superseded: same ? undefined : { line: oldLine, chart: prevChart } });
+  const diff = same ? '' : chartDiffText(prevChart, v.chart);
+  const ts = v.chart.trueSolar;
+  const intro = same ? '生辰没有变化，盘还是原来那张。' : `好，按${changeSentence(cur.data, data).split('；').map((x) => x.split('，不是')[0]).join('、')}重新排了一盘。\n\n${diff}${ts && !diff.includes('真太阳时') ? `\n\n（按${ts.city}真太阳时校正：${ts.time.slice(11, 16)}）` : ''}\n\n下面按新盘重新给你细看一遍。`;
+  console.log(`[profile] update ${uid} ${cur.id} ${same ? '(same)' : `v${cur.version + 1}`}`);
+  return { profile: { ...data, id: cur.id, label }, chart: v.chart, intro, cid, version: same ? cur.version : cur.version + 1, recast: !same, previous: same ? null : { profile: cur.data, bazi: briefBazi(prevChart) } };
 }));
-// 详批：SSE / ?stream=0 / ?mode=poll
+app.delete('/api/v1/profiles/:id', light, wrap(async (req) => {
+  const uid = needUser(req);
+  const p = await store.getProfile(uid, String(req.params.id)); if (!p) return { ok: true };
+  await store.deleteProfile(uid, p.id);
+  await forgetProfile(uid, p.id, p.cid);
+  console.log(`[profile] delete ${uid} ${p.id}`);
+  return { ok: true };
+}));
+app.get('/api/v1/profiles/:id/versions', wrap(async (req) => {
+  const uid = needUser(req);
+  return { versions: (await store.getVersions(uid, String(req.params.id))).map((x) => ({ version: x.version, data: x.data, bazi: x.chart ? briefBazi(x.chart) : '', createdAt: x.createdAt })) };
+}));
+// 详批：SSE / ?stream=0 / ?mode=poll；recast=true 表示更正生辰后的重新解读
 app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) => {
   const uid = identify(req);
   if (!uid) return res.status(401).json({ error: '未登录或身份已失效' });
   const p = await store.getProfile(uid, String(req.params.id)).catch(() => null);
   if (!p) return res.status(404).json({ error: '档案不存在' });
-  const cid = optCid(req.body?.cid);
+  const cid = optCid(req.body?.cid) || p.cid;
   const v = validateProfile(p.data, nowYearOf(req.body)); // 按当前年份重新排盘（流年随年份变化）
   if (v.error) return res.status(422).json({ error: v.error });
   const { messages } = sanitize(req.body || {});
-  const memory = cid ? await memoryContext(uid, cid).catch(() => '') : '';
-  await eventRoute(req, res, `[reading] ${req.ip}`, async (emit) => {
+  const memory = cid ? await memoryContext(uid, cid, p.id).catch(() => '') : '';
+  const recast = !!req.body?.recast && p.version > 1;
+  await eventRoute(req, res, `[reading] ${req.ip}${recast ? ' recast' : ''}`, async (emit) => {
     let text = '', score = null;
     const tap: Emit = (e, d) => { if (e === 'delta') text += d.text; emit(e, d); };
-    try { await runReading(v.profile, v.chart, messages, tap, { memory, onScore: (sc) => { score = sc; console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`); } }); }
+    try { await runReading({ ...v.profile, label: p.label || '我' }, v.chart, messages, tap, { memory, recast, onScore: (sc) => { score = sc; console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`); } }); }
     catch (e) { console.error(e); emit('error', { error: '大师走神了，请再试一次～' }); emit('done', {}); }
-    if (cid && text) recordTurn(uid, cid, { assistant: text, score }).catch((e) => console.error('[memory] record', e.message));
+    if (cid && text) recordTurn(uid, cid, { assistant: text, score, pid: p.id }).catch((e) => console.error('[memory] record', e.message));
+  });
+});
+// 合盘：两位已有命主（a 为当前对话的命主），事件同 chat
+app.post('/api/v1/compat', smallJson, limited, async (req, res) => {
+  const uid = identify(req);
+  if (!uid) return res.status(401).json({ error: '未登录或身份已失效' });
+  const [a, b] = await Promise.all([store.getProfile(uid, String(req.body?.a || '')), store.getProfile(uid, String(req.body?.b || ''))]).catch(() => [null, null]);
+  if (!a || !b || a.id === b.id) return res.status(404).json({ error: '需要两位不同的命主' });
+  const cid = optCid(req.body?.cid) || a.cid;
+  const q = typeof req.body?.question === 'string' ? req.body.question.slice(0, 300) : '我们俩合不合？';
+  const memory = cid ? await memoryContext(uid, cid, a.id).catch(() => '') : '';
+  await eventRoute(req, res, `[compat] ${req.ip}`, async (emit) => {
+    let text = '';
+    const tap: Emit = (e, d) => { if (e === 'delta') text += d.text; emit(e, d); };
+    try { await runCompat({ ...a, label: a.label || '我' }, { ...b, label: b.label || '我' }, q, [{ role: 'user', content: q }], tap, { memory, nowYear: nowYearOf(req.body) }); }
+    catch (e) { console.error(e); emit('error', { error: '大师走神了，请再试一次～' }); emit('done', {}); }
+    if (cid && text) recordTurn(uid, cid, { user: q, assistant: text, pid: a.id }).catch(() => {});
   });
 });
 

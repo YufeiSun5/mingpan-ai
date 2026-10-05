@@ -17,11 +17,19 @@ export function estTokens(s: string): number {
 }
 const j = (x: any) => JSON.stringify(x);
 const memTokens = (m: Memory) => estTokens(j(m.facts)) + estTokens(m.longTerm) + Object.values(m.convSummaries).reduce((a, s) => a + s.tokens, 0);
+export const chartSummaryOf = (c: any) => `${c.pillars.map((p: any) => (p.unknown ? '时柱不详' : p.gan + p.zhi)).join(' ')}；${c.input.gender}；日主${c.dayMaster.gan}${c.dayMaster.wuXing}${c.dayMaster.strength}；${c.pro?.geJu?.name || ''}；喜用${c.xiYong.join('')} 忌${c.jiShen.join('')}`;
+/** 每位命主独立的事实区（严格隔离：A 的问答、事件、长期印象不会进入 B 的上下文） */
+export function profileFacts(m: Memory, pid: string): any {
+  const f = m.facts || (m.facts = {});
+  const ps = f.profiles || (f.profiles = {});
+  return ps[pid] || (ps[pid] = { qa: [], events: [], prefs: [], longTerm: '', superseded: [] });
+}
 const firstSentences = (t: string, n = 90) => { const s = t.replace(/\s+/g, ' ').trim(); const m = s.match(/^.{20,}?[。！？!?]/); return (m ? m[0] : s).slice(0, n); };
 
 /** 每轮结束后：记录消息、更新事实，必要时异步压缩 */
-export async function recordTurn(uid: string, cid: string, turn: { user?: string; assistant?: string; profile?: any; chart?: any; score?: any }) {
+export async function recordTurn(uid: string, cid: string, turn: { user?: string; assistant?: string; profile?: any; chart?: any; score?: any; pid?: string | null }) {
   const store = getStore();
+  const pid = turn.pid || await store.conversationProfile(uid, cid).catch(() => null);
   const msgs = [];
   if (turn.user) msgs.push({ role: 'user' as const, content: turn.user, tokens: estTokens(turn.user) });
   if (turn.assistant) msgs.push({ role: 'assistant' as const, content: turn.assistant, tokens: estTokens(turn.assistant), meta: turn.score ? { score: turn.score } : null });
@@ -32,28 +40,58 @@ export async function recordTurn(uid: string, cid: string, turn: { user?: string
     f.birth = turn.profile;
     if (turn.chart) {
       const c = turn.chart;
-      f.chartSummary = `${c.pillars.map((p: any) => p.gan + p.zhi).join(' ')}；${c.input.gender}；日主${c.dayMaster.gan}${c.dayMaster.wuXing}${c.dayMaster.strength}；${c.pro?.geJu?.name || ''}；喜用${c.xiYong.join('')} 忌${c.jiShen.join('')}`;
+      f.chartSummary = chartSummaryOf(c);
       const key = [turn.profile.gender, turn.profile.calendar, turn.profile.year, turn.profile.month, turn.profile.day, j(turn.profile.time || null)].join('|');
       await store.saveProfile(uid, key, turn.profile, c);
     }
   }
   if (turn.user && turn.assistant && !turn.chart) {
-    f.qa = [...(f.qa || []), { q: turn.user.slice(0, 80), a: firstSentences(turn.assistant), h: turn.score?.health, at: new Date().toISOString().slice(0, 10) }].slice(-40);
+    const qa = { q: turn.user.slice(0, 80), a: firstSentences(turn.assistant), h: turn.score?.health, at: new Date().toISOString().slice(0, 10) };
+    if (pid) { const pf = profileFacts(m, pid); pf.qa = [...(pf.qa || []), qa].slice(-40); }
+    else f.qa = [...(f.qa || []), qa].slice(-40);
   }
   m.tokens = memTokens(m);
   await store.saveMemory(uid, m);
   compress(uid, cid).catch((e) => console.error('[memory] compress', e.message));
 }
 
-/** 生辰确认 / 修改：记一条 system 类型事件（供模型上下文，不是用户消息），并更新结构化事实 */
-export async function recordProfileEvent(uid: string, cid: string | null, profile: any, chart: any, text: string) {
+/**
+ * 生辰确认 / 更正 / 为他人建档：在对话里记一条 system 类型事件（供模型上下文，不是用户消息），并更新该命主的结构化事实。
+ * superseded：更正生辰时传入旧生辰与旧盘——旧结论标记为作废，本对话较早的摘要归档，之后的上下文只以新盘为准。
+ */
+export async function recordProfileEvent(uid: string, cid: string | null, pid: string | null, profile: any, chart: any, text: string, opts: { label?: string; superseded?: { line: string; chart: any } } = {}) {
   const store = getStore();
-  if (cid) await store.appendMessages(uid, cid, [{ role: 'system', content: text, tokens: estTokens(text), meta: { event: 'profile' } }]);
   const m = await store.getMemory(uid);
-  const f = m.facts || (m.facts = {});
-  f.birth = profile;
-  const c = chart;
-  f.chartSummary = `${c.pillars.map((p: any) => p.gan + p.zhi).join(' ')}；${c.input.gender}；日主${c.dayMaster.gan}${c.dayMaster.wuXing}${c.dayMaster.strength}；${c.pro?.geJu?.name || ''}；喜用${c.xiYong.join('')} 忌${c.jiShen.join('')}`;
+  if (cid && opts.superseded) {
+    const prev = await store.getMessages(uid, cid, m.convSummaries[cid]?.lastId || 0).catch(() => []);
+    const lastId = prev.length ? prev[prev.length - 1].id! : m.convSummaries[cid]?.lastId || 0;
+    const old = m.convSummaries[cid]?.text || '';
+    m.convSummaries[cid] = { text: '', lastId, tokens: 0, updatedAt: new Date().toISOString() };
+    if (pid) {
+      const pf = profileFacts(m, pid);
+      pf.superseded = [...(pf.superseded || []), { at: new Date().toISOString().slice(0, 16), birth: opts.superseded.line, chart: chartSummaryOf(opts.superseded.chart), summary: old.slice(0, 400), qa: (pf.qa || []).length }].slice(-5);
+      pf.qa = []; // 旧盘上的问答结论作废，不再进入上下文
+    }
+  }
+  if (cid) await store.appendMessages(uid, cid, [{ role: 'system', content: text, tokens: estTokens(text), meta: { event: 'profile', pid } }]);
+  if (!profile || !chart) { /* 仅记事件 */ }
+  else if (pid) {
+    const pf = profileFacts(m, pid);
+    pf.birth = profile; pf.chartSummary = chartSummaryOf(chart);
+    if (opts.label !== undefined) pf.label = opts.label;
+  } else {
+    const f = m.facts || (m.facts = {});
+    f.birth = profile; f.chartSummary = chartSummaryOf(chart);
+  }
+  m.tokens = memTokens(m);
+  await store.saveMemory(uid, m);
+}
+/** 删除命主：清掉它的事实区与对话摘要 */
+export async function forgetProfile(uid: string, pid: string, cid: string | null) {
+  const store = getStore();
+  const m = await store.getMemory(uid);
+  if (m.facts?.profiles) delete m.facts.profiles[pid];
+  if (cid) delete m.convSummaries[cid];
   m.tokens = memTokens(m);
   await store.saveMemory(uid, m);
 }
@@ -83,12 +121,14 @@ export async function compress(uid: string, cid: string, force = false) {
       const text = (r?.summary ? String(r.summary) : old.filter((x) => x.role === 'user').map((x) => x.content.slice(0, 40)).join('；')).slice(0, 800);
       m.convSummaries[cid] = { text: cs ? `${cs.text}\n${text}`.slice(-1600) : text, lastId: old[old.length - 1].id!, tokens: 0, updatedAt: new Date().toISOString() };
       m.convSummaries[cid].tokens = estTokens(m.convSummaries[cid].text);
-      const f = m.facts;
+      const pid = await store.conversationProfile(uid, cid).catch(() => null);
+      const f = pid ? profileFacts(m, pid) : m.facts;
       if (Array.isArray(r?.events)) f.events = [...new Set([...(f.events || []), ...r.events.map(String)])].slice(-30);
       if (Array.isArray(r?.prefs)) f.prefs = [...new Set([...(f.prefs || []), ...r.prefs.map(String)])].slice(-10);
       const lt = await llmJSON('你是记忆整理助手。合并客户的长期印象。只输出 JSON：{"longTerm":"不超过600字，客户是谁、关心什么、问过的重要问题和大师给过的关键结论"}',
-        `【原长期印象】${m.longTerm || '无'}\n【新增对话摘要】${text}`, 800).catch(() => null);
-      m.longTerm = String(lt?.longTerm || `${m.longTerm}\n${text}`).slice(-LONG_TERM_CHARS);
+        `【原长期印象】${(pid ? f.longTerm : m.longTerm) || '无'}\n【新增对话摘要】${text}`, 800).catch(() => null);
+      if (pid) f.longTerm = String(lt?.longTerm || `${f.longTerm || ''}\n${text}`).slice(-LONG_TERM_CHARS);
+      else m.longTerm = String(lt?.longTerm || `${m.longTerm}\n${text}`).slice(-LONG_TERM_CHARS);
     }
     await enforceBudget(uid, m);
   } finally { running.delete(uid); }
@@ -126,23 +166,33 @@ export async function enforceBudget(uid: string, m?: Memory) {
   return total;
 }
 
-/** 组装注入 system 的记忆块（受 CONTEXT_LIMIT 控制，远低于模型上下文） */
-export async function memoryContext(uid: string, cid: string): Promise<string> {
-  const m = await getStore().getMemory(uid);
-  const events = (await getStore().getMessages(uid, cid, m.convSummaries[cid]?.lastId || 0).catch(() => [])).filter((x) => x.role === 'system').slice(-3).map((x) => x.content);
-  const f = m.facts || {};
+/** 组装注入 system 的记忆块（受 CONTEXT_LIMIT 控制）。按命主严格隔离：只带当前命主的事实、问答与长期印象。 */
+export async function memoryContext(uid: string, cid: string, pidIn?: string | null): Promise<string> {
+  const store = getStore();
+  const m = await store.getMemory(uid);
+  const pid = pidIn || await store.conversationProfile(uid, cid).catch(() => null);
+  const events = (await store.getMessages(uid, cid, m.convSummaries[cid]?.lastId || 0).catch(() => [])).filter((x) => x.role === 'system').slice(-3).map((x) => x.content);
+  const legacy = m.facts || {};
+  const pf = pid ? (legacy.profiles?.[pid] || {}) : legacy;
+  // 旧版本（多命主之前）的长期印象只属于"我"
+  const own = !pid || !pf.label || pf.label === '我';
   const facts: any = {};
-  if (f.birth) facts.出生信息 = f.birth;
-  if (f.chartSummary) facts.命盘摘要 = f.chartSummary;
-  if (f.events?.length) facts.客户自述事件 = f.events;
-  if (f.prefs?.length) facts.偏好 = f.prefs;
-  if (f.qa?.length) facts.近期问答要点 = f.qa.slice(-8).map((x: any) => `${x.q} → ${x.a}`);
+  if (pid && pf.label) facts.命主 = pf.label === '我' ? '客户本人' : `客户的${pf.label}`;
+  if (pf.birth) facts.出生信息 = pf.birth;
+  if (pf.chartSummary) facts.命盘摘要 = pf.chartSummary;
+  const ev = pf.events?.length ? pf.events : own && pid ? legacy.events : null;
+  if (ev?.length) facts.客户自述事件 = ev;
+  const pr = pf.prefs?.length ? pf.prefs : own && pid ? legacy.prefs : null;
+  if (pr?.length) facts.偏好 = pr;
+  if (pf.qa?.length) facts.近期问答要点 = pf.qa.slice(-8).map((x: any) => `${x.q} → ${x.a}`);
   const core = Object.keys(facts).length ? `【客户档案（以往对话记录，供参考，命盘以本次排盘数据为准）】\n${j(facts)}` : '';
-  let lt = m.longTerm ? `【长期印象】\n${m.longTerm}` : '';
+  const sup = pf.superseded?.length
+    ? `【已作废的旧盘——严禁引用】客户更正过生辰。以下旧盘及基于它的所有结论全部作废，不得再引用、对比或沿用，一切以当前命盘为准：\n${pf.superseded.map((x: any) => `· ${x.at} 前按「${x.birth}」排的 ${x.chart}`).join('\n')}`
+    : '';
+  const ltText = pid ? (pf.longTerm || (own ? m.longTerm : '')) : m.longTerm;
+  let lt = ltText ? `【长期印象】\n${ltText}` : '';
   const conv = m.convSummaries[cid]?.text ? `【本次对话较早部分摘要】\n${m.convSummaries[cid].text}` : '';
-  // 超限时先裁长期印象（保留最近部分），出生信息与命盘摘要永不裁剪
   while (estTokens([core, lt, conv].join('\n\n')) > CONTEXT_LIMIT && lt.length > 50) lt = '【长期印象】\n…' + lt.slice(Math.floor(lt.length * 0.3));
-  const ev = events.length ? `【本次对话中的操作记录】\n${events.join('\n')}` : '';
-  const out = [core, lt, conv, ev].filter(Boolean).join('\n\n');
-  return out;
+  const evs = events.length ? `【本次对话中的操作记录】\n${events.join('\n')}` : '';
+  return [core, sup, lt, conv, evs].filter(Boolean).join('\n\n');
 }

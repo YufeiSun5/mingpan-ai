@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import type { Memory, Store, StoredMessage, User } from './types';
+import type { Memory, ProfileRow, Store, StoredMessage, User } from './types';
 
 const MIGRATIONS: string[] = [
   `create table if not exists users (
@@ -20,8 +20,21 @@ const MIGRATIONS: string[] = [
    create table if not exists memory (
      user_id text primary key references users(id) on delete cascade, facts jsonb not null default '{}', long_term text not null default '',
      conv_summaries jsonb not null default '{}', tokens int not null default 0, updated_at timestamptz not null default now());`,
+  // 2：多命主（label / 绑定对话 / 版本号），对话归属命主，生辰历史版本
+  `alter table profiles drop constraint if exists profiles_user_id_birth_key_key;
+   create index if not exists profiles_user_key_idx on profiles (user_id, birth_key);
+   alter table profiles add column if not exists label text not null default '';
+   alter table profiles add column if not exists conversation_id text;
+   alter table profiles add column if not exists version int not null default 1;
+   alter table conversations add column if not exists profile_id text;
+   create table if not exists profile_versions (
+     id bigserial primary key, profile_id text not null references profiles(id) on delete cascade, user_id text not null,
+     version int not null, data jsonb not null, chart jsonb, created_at timestamptz not null default now(), unique (profile_id, version));
+   update profiles set label='我' where label='';
+   insert into profile_versions (profile_id, user_id, version, data, chart) select id, user_id, 1, data, chart from profiles on conflict do nothing;`,
 ];
 
+const row = (r: any): ProfileRow | null => r ? { id: r.id, data: r.data, chart: r.chart, label: r.label || r.data?.label || '', cid: r.conversation_id || null, version: r.version || 1, updatedAt: r.updated_at?.toISOString?.() ?? r.updated_at, createdAt: r.created_at?.toISOString?.() ?? r.created_at } : null;
 const u = (r: any): User => r && ({ id: r.id, kind: r.kind, phone: r.phone, wechatOpenid: r.wechat_openid, createdAt: r.created_at?.toISOString?.() ?? r.created_at, lastSeenAt: r.last_seen_at?.toISOString?.() ?? r.last_seen_at, meta: r.meta });
 
 export function createPgStore(url: string): Store {
@@ -55,20 +68,50 @@ export function createPgStore(url: string): Store {
     async findUserByWechat(openid) { return u((await q('select * from users where wechat_openid=$1', [openid])).rows[0]) || null; },
     async linkWechat(id, openid, unionid) { await q(`update users set wechat_openid=$2, wechat_unionid=$3, kind='wechat' where id=$1`, [id, openid, unionid || null]); },
     async saveProfile(uid, birthKey, data, chart) {
-      const id = (await q(`insert into profiles(id, user_id, birth_key, data, chart) values (md5(random()::text || clock_timestamp()::text), $1, $2, $3, $4)
-        on conflict (user_id, birth_key) do update set data=excluded.data, chart=excluded.chart, updated_at=now() returning id`, [uid, birthKey, data, chart])).rows[0].id;
-      return id;
+      const ex = (await q('select id from profiles where user_id=$1 and birth_key=$2 order by updated_at desc limit 1', [uid, birthKey])).rows[0];
+      if (ex) { await q('update profiles set data=$3, chart=$4, updated_at=now() where user_id=$1 and id=$2', [uid, ex.id, data, chart]); return ex.id; }
+      return (await this.createProfile(uid, { birthKey, data, chart, label: data?.label || '', cid: null })).id;
     },
-    async getProfiles(uid) { return (await q('select id, data, updated_at from profiles where user_id=$1 order by updated_at desc', [uid])).rows.map((r) => ({ id: r.id, data: r.data, updatedAt: r.updated_at.toISOString() })); },
-    async getProfile(uid, id) { const r = (await q('select id, data, chart from profiles where user_id=$1 and id=$2', [uid, id])).rows[0]; return r || null; },
+    async createProfile(uid, p) {
+      const c = await pool.connect();
+      try {
+        await c.query('begin');
+        const r = (await c.query(`insert into profiles(id, user_id, birth_key, data, chart, label, conversation_id) values (md5(random()::text || clock_timestamp()::text), $1, $2, $3, $4, $5, $6) returning *`, [uid, p.birthKey, p.data, p.chart, p.label, p.cid])).rows[0];
+        await c.query('insert into profile_versions(profile_id, user_id, version, data, chart) values ($1,$2,1,$3,$4)', [r.id, uid, p.data, p.chart]);
+        if (p.cid) await c.query(`insert into conversations(user_id, id, profile_id) values ($1,$2,$3) on conflict (user_id, id) do update set profile_id=excluded.profile_id, updated_at=now()`, [uid, p.cid, r.id]);
+        await c.query('commit');
+        return row(r);
+      } catch (e) { await c.query('rollback'); throw e; } finally { c.release(); }
+    },
+    async findProfile(uid, birthKey, label) { return row((await q('select * from profiles where user_id=$1 and birth_key=$2 and label=$3 order by updated_at desc limit 1', [uid, birthKey, label])).rows[0]); },
+    async getProfiles(uid) { return (await q('select * from profiles where user_id=$1 order by created_at', [uid])).rows.map(row); },
+    async getProfile(uid, id) { return row((await q('select * from profiles where user_id=$1 and id=$2', [uid, id])).rows[0]); },
     async updateProfile(uid, id, birthKey, data, chart) {
-      // 改成与已有档案相同的生辰：直接合并到那份档案，删掉当前这份
-      const dup = (await q('select id from profiles where user_id=$1 and birth_key=$2 and id<>$3', [uid, birthKey, id])).rows[0];
-      if (dup) { await q('delete from profiles where user_id=$1 and id=$2', [uid, id]); await q('update profiles set data=$3, chart=$4, updated_at=now() where user_id=$1 and id=$2', [uid, dup.id, data, chart]); return dup.id; }
-      await q('update profiles set birth_key=$3, data=$4, chart=$5, updated_at=now() where user_id=$1 and id=$2', [uid, id, birthKey, data, chart]);
+      const c = await pool.connect();
+      try {
+        await c.query('begin');
+        const v = (await c.query('update profiles set birth_key=$3, data=$4, chart=$5, version=version+1, updated_at=now() where user_id=$1 and id=$2 returning version', [uid, id, birthKey, data, chart])).rows[0]?.version;
+        if (v) await c.query('insert into profile_versions(profile_id, user_id, version, data, chart) values ($1,$2,$3,$4,$5) on conflict do nothing', [id, uid, v, data, chart]);
+        await c.query('commit');
+      } catch (e) { await c.query('rollback'); throw e; } finally { c.release(); }
       return id;
     },
-    async ensureConversation(uid, cid) { await q(`insert into conversations(user_id, id) values ($1,$2) on conflict (user_id, id) do update set updated_at=now()`, [uid, cid]); },
+    async renameProfile(uid, id, label, name) {
+      await q(`update profiles set label=$3, data = case when $4::text is null then data else jsonb_set(data, '{name}', to_jsonb($4::text)) end, updated_at=now() where user_id=$1 and id=$2`, [uid, id, label, name ?? null]);
+    },
+    async deleteProfile(uid, id) {
+      const p = await this.getProfile(uid, id); if (!p) return;
+      await q('delete from conversations where user_id=$1 and (profile_id=$2 or id=$3)', [uid, id, p.cid || '']);
+      await q('delete from profiles where user_id=$1 and id=$2', [uid, id]);
+    },
+    async bindConversation(uid, id, cid) {
+      await q('update profiles set conversation_id=$3 where user_id=$1 and id=$2', [uid, id, cid]);
+      await q(`insert into conversations(user_id, id, profile_id) values ($1,$2,$3) on conflict (user_id, id) do update set profile_id=excluded.profile_id`, [uid, cid, id]);
+    },
+    async getVersions(uid, id) { return (await q('select version, data, chart, created_at from profile_versions where user_id=$1 and profile_id=$2 order by version', [uid, id])).rows.map((r) => ({ version: r.version, data: r.data, chart: r.chart, createdAt: r.created_at.toISOString() })); },
+    async conversationProfile(uid, cid) { return (await q('select profile_id from conversations where user_id=$1 and id=$2', [uid, cid])).rows[0]?.profile_id || null; },
+    async ensureConversation(uid, cid, profileId = null) { await q(`insert into conversations(user_id, id, profile_id) values ($1,$2,$3) on conflict (user_id, id) do update set updated_at=now(), profile_id=coalesce(excluded.profile_id, conversations.profile_id)`, [uid, cid, profileId]); },
+    async deleteConversation(uid, cid) { await q('delete from conversations where user_id=$1 and id=$2', [uid, cid]); },
     async hasConversation(uid, cid) { return (await q('select 1 from conversations where user_id=$1 and id=$2', [uid, cid])).rowCount > 0; },
     async appendMessages(uid, cid, msgs) {
       if (!msgs.length) return;
@@ -102,11 +145,12 @@ export function createPgStore(url: string): Store {
     },
     async exportUser(uid) {
       const user = await this.getUser(uid); if (!user) return null;
-      const profiles = (await q('select id, data, chart, created_at, updated_at from profiles where user_id=$1', [uid])).rows;
+      const profiles = (await q('select id, label, data, chart, version, conversation_id, created_at, updated_at from profiles where user_id=$1', [uid])).rows;
+      const versions = (await q('select profile_id, version, data, created_at from profile_versions where user_id=$1 order by profile_id, version', [uid])).rows;
       const convs = await this.listConversations(uid);
       const conversations: Record<string, StoredMessage[]> = {};
       for (const c of convs) conversations[c.id] = await this.getMessages(uid, c.id);
-      return { user, profiles, memory: await this.getMemory(uid), conversations };
+      return { user, profiles, profileVersions: versions, memory: await this.getMemory(uid), conversations };
     },
   };
 }

@@ -1,6 +1,6 @@
 // 聊天式流程：提取出生信息 → 确认 → 排盘 → 流式详批 → 追问对答
 // handleChat(body, emit) 与平台无关：emit(event, data) 由 Express(SSE) 或云函数(收集为数组) 实现。
-import { computeChart, checkDate } from '@mingpan/core';
+import { computeChart, checkDate, profileChanges, changeSentence, chartDiffText, compatRelations, briefBazi } from '@mingpan/core';
 import { buildReadingMessages, chartToText, readTemplate, fill, loadStyle } from './prompt';
 import { generateFallback } from '@mingpan/core';
 import { chat, chatStream, getProvider, getLastUsage } from './llm';
@@ -14,12 +14,17 @@ function sanitize(body): any {
   const messages = (Array.isArray(body.messages) ? body.messages : [])
     .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
     .slice(-20).map((m) => ({ role: m.role, content: m.content.slice(0, m.role === 'user' ? 500 : 4000) }));
-  return { messages, pending: cleanProfile(body.pending), profile: cleanProfile(body.profile), action: body.action, nowYear: +body.nowYear || undefined, ui: body.ui === 'card' ? 'card' : 'text' };
+  const pending = cleanProfile(body.pending);
+  const c = body.pending?.correction;
+  if (pending && c && typeof c.id === 'string' && c.id.length <= 64) pending.correction = { id: c.id, changed: Object.fromEntries(Object.entries(c.changed || {}).filter(([k, v]) => ['gender', 'calendar', 'date', 'time', 'city', 'label'].includes(k) && typeof v === 'string').map(([k, v]) => [k, String(v).slice(0, 20)])) };
+  return { messages, pending, profile: cleanProfile(body.profile), action: body.action, nowYear: +body.nowYear || undefined, ui: body.ui === 'card' ? 'card' : 'text' };
 }
 function cleanProfile(p): any {
   if (!p || typeof p !== 'object') return null;
   const o: any = {};
-  if (typeof p.name === 'string') o.name = p.name.slice(0, 12);
+  if (typeof p.name === 'string' && p.name.trim()) o.name = p.name.trim().slice(0, 12);
+  if (typeof p.label === 'string' && p.label.trim()) o.label = p.label.trim().slice(0, 8);
+  if (p.newPerson) o.newPerson = true;
   if (p.gender === '男' || p.gender === '女') o.gender = p.gender;
   if (p.calendar === 'lunar' || p.calendar === 'solar') o.calendar = p.calendar;
   for (const k of ['year', 'month', 'day']) if (Number.isInteger(+p[k]) && +p[k] > 0) o[k] = +p[k];
@@ -63,13 +68,14 @@ function dialogText(messages) {
 }
 function parseJSON(s) { const m = String(s).match(/\{[\s\S]*\}/); return m ? JSON.parse(m[0]) : null; }
 
-async function extract(messages, pending, nowYear) {
+async function extract(messages, pending, nowYear, subject = '') {
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
   const p = getProvider();
   if (p.available) {
     try {
       const t = readTemplate('extract.md');
-      const vars = { NOW_YEAR: nowYear, PENDING: pending ? JSON.stringify(pending) : '（无）', DIALOG: dialogText(messages) };
+      const pend = pending ? { ...pending } : null; if (pend) { delete pend.newPerson; delete pend.correction; }
+      const vars = { NOW_YEAR: nowYear, PENDING: pend ? JSON.stringify(pend) : '（无）', DIALOG: dialogText(messages), SUBJECT: subject ? `【注意】客户现在是在替自己的「${subject}」提供出生信息：只提取${subject}的信息，对话里客户本人的生辰不要混进来；label 填「${subject}」。` : '' };
       const t0 = Date.now();
       const out = await chat([{ role: 'system', content: fill(t.system, vars) }, { role: 'user', content: fill(t.user, vars) }], { json: true, temperature: 0.1, maxTokens: 600 });
       console.log(`[extract] ${p.name}:${p.model} ${Date.now() - t0}ms`);
@@ -111,8 +117,15 @@ function leakFilter(out: (t: string) => void) {
 }
 
 // 流式输出：评分由程序确定性计算（不让模型先吐 JSON），只作为服务端内部事件；正文第一个 token 起就直接流给客户端
-async function streamText(messages, emit, fallbackText, opts: any = {}) {
+async function streamText(messages, emit0, fallbackText, opts: any = {}) {
   const p = getProvider();
+  // gate：推测执行——先请求模型，输出先压住，等意图判断出结果再决定放行还是丢弃
+  let emit = emit0;
+  if (opts.gate) {
+    let open: boolean | null = null; const held: [string, any][] = [];
+    opts.gate.then((ok) => { open = ok; if (ok) held.splice(0).forEach(([e, d]) => emit0(e, d)); });
+    emit = (e, d) => { if (open === true) emit0(e, d); else if (open === null) held.push([e, d]); };
+  }
   const { chart, scoreCtx } = opts;
   if (scoreCtx && opts.onScore) opts.onScore(SC.buildCard(chart, scoreCtx)); // 只回调给服务端，不产生任何下发事件
   const f = leakFilter((t) => emit('delta', { text: t }));
@@ -183,7 +196,8 @@ async function streamReadingParallel(rm, emit, fallbackText, opts: any = {}) {
     }
   };
   const run = (i) => {
-    const sec = SECTIONS[i];
+    const sec = i === 0 && opts.recast ? { ...SECTIONS[0], extra: '这是客户更正生辰后按新盘重新做的解读：不要打招呼，不要提旧盘，第一句直接用「按新盘来看」之类的话进入本节。' }
+      : i === 0 && opts.subject ? { ...SECTIONS[0], extra: `客户刚才一直在跟你聊，这次是替自己的${opts.subject}看盘：不要说"你好""这位朋友"，开头用一两句自然的话说说对${whoOf(opts.subject)}这个盘的第一印象（如「${whoOf(opts.subject)}这个盘啊……」），再进入本节。` } : SECTIONS[i];
     const others = SECTIONS.filter((_, j) => j !== i).map((x) => x.h).join('、');
     const msgs = [rm[0], { role: 'user', content: `${rm[1].content}\n\n【本次分工】这份解读由五位同门分节同时撰写，你只负责其中「## ${sec.h}」这一节：以"## ${sec.h}"这一行开头，写 ${sec.words} 字（严格控制篇幅，宁短勿长），写完这一节就停。${sec.extra}不要写其他小节（${others}）的内容，也不要重复别的小节会讲的东西；除非本节要求，否则不要寒暄开场、不要写结尾祝福。` }];
     return chatStream(msgs, (d) => { if (!first) first = Date.now() - t0; bufs[i] += d; pump(); }, opts.llm || {})
@@ -222,17 +236,138 @@ function followUpFallback(chart, q) {
   return `嗯，这个问题我看了一下。从你的命局看，日主${chart.dayMaster.gan}${chart.dayMaster.wuXing}${chart.dayMaster.strength}，喜用${chart.xiYong.join('、')}。顺着喜用神的方向去做，多用${chart.luck[0].colors.join('、')}，往${chart.luck[0].direction}发展，会越来越顺的。\n\n你也可以问我具体某一年，比如"${chart.nowYear + 1}年怎么样"。`;
 }
 
-async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any) => void } = {}) {
-  const { messages, pending, profile, action, nowYear: ny, ui } = sanitize(body || {});
+// ---------- 多命主：称呼、意图识别 ----------
+const MALE = /^(老公|丈夫|先生|男朋友|男友|爸|爸爸|父亲|老爸|儿子|哥|哥哥|弟|弟弟|爷爷|外公|公公|岳父|老爷子|男同事|兄弟)$/;
+const FEMALE = /^(老婆|妻子|媳妇|太太|女朋友|女友|妈|妈妈|母亲|老妈|女儿|闺女|姐|姐姐|妹|妹妹|奶奶|外婆|婆婆|岳母|闺蜜|女同事)$/;
+const REL = /^(老公|丈夫|先生|老婆|妻子|媳妇|太太|爱人|男朋友|女朋友|男友|女友|对象|爸|爸爸|妈|妈妈|父亲|母亲|老爸|老妈|儿子|女儿|闺女|孩子|宝宝|哥|哥哥|姐|姐姐|弟|弟弟|妹|妹妹|朋友|同事|闺蜜|兄弟|老板|领导|婆婆|公公|岳父|岳母|爷爷|奶奶|外公|外婆|同学|室友)$/;
+export const genderOfLabel = (l = '') => (MALE.test(l) ? '男' : FEMALE.test(l) ? '女' : undefined);
+/** 对客户说话时怎么称呼命主："你" / "你老公" / "小王" */
+export const whoOf = (l?: string) => (!l || l === '我' ? '你' : REL.test(l) ? `你${l}` : l);
+export function subjectNote(label?: string) {
+  if (!label || label === '我') return '';
+  return `【命主】这张盘是客户的${label}，不是正在聊天的客户本人。对客户说话时用「${whoOf(label)}」或「他/她」来称呼命主（如「${whoOf(label)}这个盘…」），不要把命主当成正在聊天的人。`;
+}
+const CORR_RE = /记错|搞错|弄错|说错|写错|输错|打错|填错|填成|说成|写成|其实是|其实我是|其实他是|其实她是|应该是|更正|纠正|改成|改为|改一下|不是.{0,10}是|不对/;
+const PERSON_RE = /(老公|丈夫|先生|老婆|妻子|媳妇|太太|爱人|男朋友|女朋友|男友|女友|对象|爸|妈|父亲|母亲|儿子|女儿|闺女|孩子|宝宝|哥|姐|弟|妹|朋友|同事|闺蜜|兄弟|老板|领导|婆婆|公公|岳父|岳母|爷爷|奶奶|外公|外婆|同学|室友|别人|另一个人|再算|再看一个|再排)/;
+const PERSON_ACT = /看看|看一下|算算|算一下|算一个|排一下|排个|测|八字|命|生日|出生|生的|\d{2,4}年|合不合|配不配|合盘|合婚|运势|运气|怎么样|如何|好不好|身体|事业|学业|性格/;
+const COMPAT_RE = /合盘|合婚|合不合|配不配|般配|合得来|相配|八字合|合适吗|合适不/;
+export const mightRoute = (t: string) => CORR_RE.test(t) || COMPAT_RE.test(t) || (PERSON_RE.test(t) && PERSON_ACT.test(t));
+
+const birthLine = (p) => { try { return profileLine({ ...p, topics: [] }); } catch { return '（信息不全）'; } };
+async function route(messages, cur, profiles, nowYear) {
+  const p = getProvider();
+  if (!p.available) return null;
+  try {
+    const t = readTemplate('route.md');
+    const list = (profiles || []).map((x) => `- id=${x.id} 称呼=${x.label || '我'} ${birthLine(x.data)}`).join('\n') || '（无）';
+    const vars = { NOW_YEAR: nowYear, CURRENT: `${cur.label || '我'}（${birthLine(cur)}）`, PROFILES: list, DIALOG: dialogText(messages.slice(-4)) };
+    const t0 = Date.now();
+    const out = await chat([{ role: 'system', content: fill(t.system, vars) }, { role: 'user', content: fill(t.user, vars) }], { json: true, temperature: 0, maxTokens: 400 });
+    const j = parseJSON(out);
+    console.log(`[route] ${Date.now() - t0}ms intent=${j?.intent}`);
+    return j;
+  } catch (e) { console.error('[route]', e.message); return null; }
+}
+/** 正则兜底：模型不可用时识别"记错了是4号"一类的简单更正 */
+function regexCorrection(text: string, cur) {
+  if (!CORR_RE.test(text)) return null;
+  const ch: any = {};
+  const d = text.match(/(\d{1,2})\s*[号日]/); if (d) ch.day = +d[1];
+  const m = text.match(/(\d{1,2})\s*月/); if (m) ch.month = +m[1];
+  const y = text.match(/((?:19|20)\d{2})\s*年/); if (y) ch.year = +y[1];
+  if (/男/.test(text) && cur.gender !== '男' && /是男|男的|男生|男孩/.test(text)) ch.gender = '男';
+  if (/女/.test(text) && cur.gender !== '女' && /是女|女的|女生|女孩/.test(text)) ch.gender = '女';
+  if (/农历|阴历/.test(text)) ch.calendar = 'lunar'; else if (/公历|阳历|新历/.test(text)) ch.calendar = 'solar';
+  const h = text.match(/(早上|上午|中午|下午|晚上|凌晨)?\s*(\d{1,2})\s*点(半)?/);
+  if (h) { let hr = +h[2]; if (/下午|晚上/.test(h[1] || '') && hr < 12) hr += 12; ch.time = { type: 'exact', hour: hr % 24, minute: h[3] ? 30 : 0 }; }
+  return Object.keys(ch).length ? { intent: 'correction', changes: ch } : null;
+}
+
+const REASON = { date: '日子一变，日柱就跟着变', time: '时辰一变，时柱就跟着变', gender: '男女不同，大运的顺逆就不一样', calendar: '公历农历差得远，四柱可能整个都会变', city: '出生地关系到真太阳时，时辰可能会挪一格' };
+/** 更正生辰：在大师这一轮里放一张预填好的更正卡片（改动处高亮、标出原值），按钮「按这个重排」→ PATCH */
+function handleCorrection(cur, startFrom, changes, emit) {
+  const base = { ...cur }; delete base.id; delete base.label;
+  const from = { ...startFrom }; delete from.correction; delete from.awaitingConfirm; delete from.newPerson;
+  const next: any = cleanProfile({ ...from, ...changes, time: changes.time || from.time, topics: cur.topics, label: cur.label });
+  if (!next.calendar) next.calendar = base.calendar || 'solar';
+  const changed = profileChanges(base, next);
+  if (!Object.keys(changed).length) return false;
+  const keys = Object.keys(changed);
+  const bad = checkDate(next);
+  const why = REASON[keys.find((k) => REASON[k]) || 'date'];
+  const text = bad
+    ? `嗯…${bad.replace(/，请再核对一下$/, '')}。我把卡片先按你说的改好了，日期你再核对一下，改对了点「按这个重排」就行。`
+    : `哦，${changeSentence(base, next)}啊。${why}，盘得重排。我把改动标在下面了，你看一眼，没问题就点「按这个重排」。`;
+  emit('text', { text });
+  emit('pending', { pending: { ...next, awaitingConfirm: true, correction: { id: cur.id, changed } } });
+  emit('done', {});
+  return true;
+}
+
+/** 想看另一个人：先问对方的生辰（或直接提取），再给一张带"称呼"的新卡片，确认后单独建档、单独对话 */
+function handleOtherPerson(person, profiles, emit, compatAsked = false) {
+  const label = String(person?.label || '').trim().slice(0, 8) || '朋友';
+  const exist = (profiles || []).find((x) => x.label === label);
+  const who = whoOf(label);
+  if (exist && !person?.year) {
+    emit('text', { text: compatAsked
+      ? `${who}的盘之前已经排过了。要看你们俩合不合，直接问我「我和${label}合不合」就行。`
+      : `${who}的盘之前已经排过了，在单独的一页里。点下面切过去，接着看${who}的就好，两个人的盘分开看才不会串。` });
+    if (!compatAsked) emit('switch', { profileId: exist.id, label });
+    emit('done', {});
+    return;
+  }
+  const p: any = cleanProfile({ ...(person || {}), label, newPerson: true });
+  if (!p.gender) { const g = genderOfLabel(label); if (g) p.gender = g; }
+  p.newPerson = true;
+  const missing = missingOf(p);
+  if (missing.length) {
+    emit('pending', { pending: p });
+    emit('text', { text: `好呀。不过要看${who}的事，得用${who}自己的八字单独排一盘，拿你的盘去套是不准的。把${who}的${missing.filter((x) => !x.startsWith('出生时间')).concat(missing.some((x) => x.startsWith('出生时间')) ? ['出生时间（不清楚也没关系）'] : []).join('、')}发我，我给${who}单独建一份命盘。${compatAsked ? '建好以后，你们俩合不合我也能一起看。' : ''}` });
+    emit('done', {});
+    return;
+  }
+  if (!p.calendar) p.calendar = 'solar';
+  const bad = checkDate(p);
+  if (bad) { emit('pending', { pending: { ...p, day: undefined } }); emit('text', { text: `嗯…${bad.replace(/，请再核对一下$/, '')}，${who}的生日再帮我核对一下？` }); emit('done', {}); return; }
+  emit('text', { text: `好，我单独给${who}建一份命盘，跟你的分开放，不会串。信息在下面，你核对一下，没问题点「开始排盘」。` });
+  emit('pending', { pending: { ...p, awaitingConfirm: true } });
+  emit('done', {});
+}
+
+/** 合盘：两张命盘 + 程序算出的两人关系 → 模型解读（守同样的边界与评分规则） */
+async function runCompat(a, b, q, messages, emit, ctx: any = {}) {
+  const nowYear = ctx.nowYear || new Date().getFullYear();
+  const ca: any = computeChart({ ...toInput(a.data || a), nowYear }), cb: any = computeChart({ ...toInput(b.data || b), nowYear });
+  const nA = a.label && a.label !== '我' ? a.label : '你', nB = b.label && b.label !== '我' ? b.label : '你';
+  const rel = compatRelations(ca, cb, nA, nB);
+  const t = readTemplate('compat.md');
+  const scoreCtx = SC.scorePrompt(ca, nowYear, q, SC.pickDims('感情 ' + q));
+  const sys = fill(t.system, { NAME_A: nA, NAME_B: nB, CHART_A: chartToText(ca), CHART_B: chartToText(cb), RELATIONS: rel.lines.join('\n'), NOW_YEAR: nowYear, NEXT_YEAR: nowYear + 1, LAST_YEAR: nowYear - 1, STYLE_GUIDE: loadStyle().guide, SCORE_CONTEXT: scoreCtx.text, MEMORY: ctx.memory || '' });
+  emit('compat', { a: { label: nA, bazi: briefBazi(ca) }, b: { label: nB, bazi: briefBazi(cb) }, good: rel.good.slice(0, 4), bad: rel.bad.slice(0, 3) });
+  emit('bubble', {});
+  const fb = () => `你们俩的盘我对着看了一下：${rel.good.length ? `合的地方有${rel.good.slice(0, 2).join('，')}` : '没有特别突出的相合'}${rel.bad.length ? `；需要磨合的是${rel.bad.slice(0, 2).join('，')}` : ''}。\n\n两个人过日子，盘上的合冲只是底色，遇事多商量、多体谅，比什么都管用。`;
+  const r = await streamText([{ role: 'system', content: sys }, ...messages.slice(-6)], emit, fb, { chart: ca, scoreCtx, onScore: ctx.onScore, llm: { temperature: 0.7, maxTokens: 1100 } });
+  emit('quick', { replies: [`${nowYear + 1}年适合结婚吗？`, '我们俩相处要注意什么？'] });
+  emit('done', { source: r.source });
+}
+
+interface ChatCtx { memory?: string; onScore?: (s: any) => void; current?: { id: string; label: string; data: any } | null; profiles?: { id: string; label: string; data: any }[] }
+async function handleChat(body, emit, ctx: ChatCtx = {}) {
+  const { messages, pending, profile: bodyProfile, action, nowYear: ny, ui } = sanitize(body || {});
   const nowYear = ny || new Date().getFullYear();
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
+  // 当前命主以服务端档案为准（多命主时由 profileId 指定）
+  const profile = ctx.current ? { ...cleanProfile(ctx.current.data), id: ctx.current.id, label: ctx.current.label || '我' } : bodyProfile;
+  const profiles = ctx.profiles || [];
 
   // 0) 危机信号：大师不出戏，用命盘讲"低谷会过去"，自然地织入求助热线；紧急时优先让对方马上打电话、找身边的人
   if (action !== 'confirm' && SC.isCrisis(lastUser)) {
     const acute = SC.isAcute(lastUser);
     console.log(`[chat] crisis signal${acute ? ' ACUTE' : ''}`);
     let chart = null;
-    if (profile && missingOf(profile).length === 0) { try { chart = computeChart({ ...toInput(profile), nowYear }); } catch { chart = null; } }
+    const own = profile && (!profile.label || profile.label === '我') ? profile : (profiles.find((x) => x.label === '我')?.data || null);
+    if (own && missingOf(own).length === 0) { try { chart = computeChart({ ...toInput(own), nowYear }); } catch { chart = null; } }
     const tp = chart ? SC.turningPoints(chart) : null;
     const sys = fill(readTemplate('crisis.md').system, {
       TURNING: tp?.lines.length ? `${chart.pillars.map((p) => p.gan + p.zhi).join(' ')}，日主${chart.dayMaster.gan}${chart.dayMaster.wuXing}，喜用${chart.xiYong.join('')}\n${tp.lines.join('\n')}` : '（还没有排盘，不要谈具体年份运势）',
@@ -251,31 +386,70 @@ async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any)
     return;
   }
 
-  // 1) 已排盘：追问
-  if (profile && missingOf(profile).length === 0 && action !== 'confirm') {
-    const q = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
-    const chart = computeChart({ ...toInput(profile, { extraYears: yearsMentioned(q, nowYear) }), nowYear });
-    const t = readTemplate('chat.md');
-    const year = yearsMentioned(q, nowYear)[0] || nowYear;
-    const scoreCtx = SC.scorePrompt(chart, year, q);
-    const sys = fill(t.system, { CHART: chartToText(chart), NOW_YEAR: nowYear, NAME: profile.name || '', STYLE_GUIDE: loadStyle().guide, SCORE_CONTEXT: scoreCtx.text }) + (ctx.memory ? `\n\n${ctx.memory}` : '');
-    emit('bubble', {});
-    const r = await streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx, onScore: ctx.onScore });
+  const hasChart = profile && missingOf(profile).length === 0;
+  // 0.5) 正在为另一个人收集生辰：继续提取（这一句完全没提生辰就回到当前命主的追问）
+  let collectingOther = !!(pending?.newPerson && hasChart && action !== 'confirm');
+  if (collectingOther && !pending.awaitingConfirm && !/\d|[一二三四五六七八九十]月|号|初|十五|点|时|男|女|农历|阴历|公历|阳历|不知道|不清楚|记不得/.test(lastUser)) {
+    emit('pending', { pending: null });
+    collectingOther = false;
+  }
+
+  // 1) 已排盘：先判断是否在更正生辰 / 想看另一个人 / 合盘；同时推测执行普通追问（输出先压住），判断为普通追问就直接放行
+  if (hasChart && action !== 'confirm' && !collectingOther) {
+    const q = lastUser;
+    const followUp = (gate?: Promise<boolean>) => {
+      const chart = computeChart({ ...toInput(profile, { extraYears: yearsMentioned(q, nowYear) }), nowYear });
+      const t = readTemplate('chat.md');
+      const year = yearsMentioned(q, nowYear)[0] || nowYear;
+      const scoreCtx = SC.scorePrompt(chart, year, q);
+      const sys = fill(t.system, { CHART: chartToText(chart), NOW_YEAR: nowYear, NEXT_YEAR: nowYear + 1, LAST_YEAR: nowYear - 1, NAME: profile.label && profile.label !== '我' ? '' : profile.name || '', SUBJECT: subjectNote(profile.label), STYLE_GUIDE: loadStyle().guide, SCORE_CONTEXT: scoreCtx.text }) + (ctx.memory ? `\n\n${ctx.memory}` : '');
+      let held = null;
+      const onScore = gate ? (sc) => { held = sc; gate.then((ok) => ok && ctx.onScore?.(held)); } : ctx.onScore;
+      if (gate) gate.then((ok) => ok && emit('bubble', {})); else emit('bubble', {}); // 推测执行时，气泡也等意图判断后再出
+      return streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx, onScore, gate });
+    };
+    if (mightRoute(q)) {
+      let release: (ok: boolean) => void;
+      const gate = new Promise<boolean>((ok) => (release = ok));
+      const spec = followUp(gate).catch((e) => { console.error('[followup spec]', e.message); return { source: 'error' }; });
+      let r = await route(messages, profile, profiles, nowYear);
+      if (!r || !r.intent) r = regexCorrection(q, profile) || { intent: 'none' };
+      if (r.intent === 'correction' && r.changes && Object.keys(r.changes).length) {
+        const startFrom = pending?.correction?.id === profile.id ? pending : profile;
+        if (handleCorrection(profile, startFrom, r.changes, emit)) { release(false); return; }
+      }
+      if (r.intent === 'compat') {
+        const other = profiles.find((x) => x.id === r.compat_with && x.id !== profile.id)
+          || (r.person?.label ? profiles.find((x) => x.label === r.person.label && x.id !== profile.id) : null);
+        if (other) { release(false); await runCompat(profile, other, q, messages, emit, { ...ctx, nowYear }); return; }
+        if (r.person) { release(false); handleOtherPerson(r.person, profiles, emit, true); return; }
+      }
+      if (r.intent === 'other_person' && r.person) { release(false); handleOtherPerson(r.person, profiles, emit); return; }
+      release(true);
+      const out = await spec;
+      emit('done', { source: (out as any).source });
+      return;
+    }
+    const r = await followUp();
     emit('done', { source: r.source });
     return;
   }
 
-  // 2) 确认后排盘 + 详批
+  // 2) 确认后排盘 + 详批（旧版文字确认）
   let target = null;
   if (action === 'confirm' && pending && missingOf(pending).length === 0) target = pending;
 
-  // 3) 提取出生信息
+  // 3) 提取出生信息（首次建档，或正在为另一个人建档）
   if (!target) {
-    const { x, reply } = await extract(messages, pending, nowYear);
+    const subject = collectingOther ? pending.label : '';
+    const { x, reply } = await extract(messages, pending, nowYear, subject);
     const { confirmed, ...fields } = x;
+    if (collectingOther) { fields.label = pending.label; fields.newPerson = true; if (!fields.gender && !pending.gender) { const g = genderOfLabel(pending.label); if (g) fields.gender = g; } }
+    else if (!fields.label && !pending?.label) fields.label = profiles.some((p) => p.label === '我') ? undefined : '我';
     const merged = merge(pending, fields);
+    delete merged.correction;
     const missing = missingOf(merged);
-    if (confirmed && pending?.awaitingConfirm && missing.length === 0) target = merged;
+    if (confirmed && pending?.awaitingConfirm && missing.length === 0 && ui !== 'card') target = merged;
     else if (missing.length) {
       delete merged.awaitingConfirm;
       emit('pending', { pending: merged });
@@ -292,7 +466,10 @@ async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any)
       }
       merged.awaitingConfirm = true;
       if (ui === 'card') { // 新前端：信息整理成可编辑的确认卡片，由「开始排盘」按钮走 /api/v1/profiles
-        emit('text', { text: CARD_LINES[Math.floor(Math.random() * CARD_LINES.length)] });
+        const who = whoOf(merged.label);
+        emit('text', { text: merged.newPerson || (merged.label && merged.label !== '我')
+          ? `好，${who}的信息齐了。我单独给${who}建一份命盘，跟你的分开放。你核对一下，没问题点「开始排盘」。`
+          : CARD_LINES[Math.floor(Math.random() * CARD_LINES.length)] });
         emit('pending', { pending: merged });
       } else {
         emit('pending', { pending: merged });
@@ -333,7 +510,7 @@ function profileLine(p) {
 }
 
 /** 校验并排盘：返回规范化的生辰与命盘，或错误信息 */
-function validateProfile(raw, nowYear) {
+function validateProfile(raw, nowYear): any {
   const p = cleanProfile(raw);
   if (!p) return { error: '缺少生辰信息' };
   delete p.awaitingConfirm;
@@ -349,7 +526,7 @@ function validateProfile(raw, nowYear) {
 }
 
 /** 详批：评分（仅服务端）→ 分节并行流式 → 收尾 + 推荐追问 */
-async function runReading(prof, chart, messages, emit, ctx: { memory?: string; onScore?: (s: any) => void } = {}) {
+async function runReading(prof, chart, messages, emit, ctx: { memory?: string; onScore?: (s: any) => void; recast?: boolean } = {}) {
   const nowYear = chart.nowYear;
   emit('bubble', {});
   const questions = { topics: prof.topics || [], text: prof.question || '' };
@@ -357,11 +534,14 @@ async function runReading(prof, chart, messages, emit, ctx: { memory?: string; o
   const scoreCtx = SC.scorePrompt(chart, nowYear, qText, prof.topics?.length ? SC.pickDims(prof.topics.join(' ') + qText) : SC.pickDims(qText));
   const rm = buildReadingMessages(chart, questions, { SCORE_CONTEXT: scoreCtx.text });
   if (ctx.memory) rm[0].content += `\n\n${ctx.memory}`;
-  const r = await streamReadingParallel(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx, onScore: ctx.onScore });
+  const subj = subjectNote(prof.label);
+  if (subj) rm[0].content += `\n\n${subj}`;
+  if (ctx.recast) rm[0].content += '\n\n【重要】客户刚更正了生辰，这是按新盘重新做的解读：旧盘及基于旧盘的结论全部作废，不要提及、对比或沿用，一切以上面的新排盘数据为准。';
+  const r = await streamReadingParallel(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx, onScore: ctx.onScore, recast: ctx.recast, subject: prof.label && prof.label !== '我' ? prof.label : '' });
   emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，直接问我就行。' });
   emit('quick', { replies: suggestions(chart) });
   emit('done', { source: r.source });
   return r;
 }
 
-export { handleChat, runReading, validateProfile, profileLine, readingIntro, sanitize };
+export { handleChat, runReading, runCompat, validateProfile, profileLine, readingIntro, sanitize };

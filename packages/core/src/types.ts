@@ -5,7 +5,17 @@ export interface BirthTime { type: 'exact' | 'shichen' | 'unknown'; hour?: numbe
 export interface Profile {
   name?: string; gender?: Gender; calendar?: 'solar' | 'lunar'; year?: number; month?: number; day?: number; leap?: boolean;
   time?: BirthTime; city?: string; topics?: string[]; question?: string; awaitingConfirm?: boolean; id?: string;
+  /** 命主与客户的关系 / 称呼：我、老公、妈妈、朋友、名字… */
+  label?: string;
+  /** 正在为另一个人建档（确认后单独建档、单独对话） */
+  newPerson?: boolean;
+  /** 更正已有档案：id＝档案 id；changed＝{字段: 原来的显示文本}，卡片据此高亮并显示"原：3号" */
+  correction?: { id: string; changed: Partial<Record<'gender' | 'calendar' | 'date' | 'time' | 'city' | 'label', string>> };
 }
+/** 命主列表项（GET /api/v1/profiles） */
+export interface ProfileSummary { id: string; label: string; name: string; data: Profile; cid: string | null; version: number; bazi: string; updatedAt: string }
+/** 合盘摘要卡片（程序计算的两人关系） */
+export interface CompatCard { a: { label: string; bazi: string }; b: { label: string; bazi: string }; good: string[]; bad: string[] }
 export interface Pillar {
   label: string; gan: string; zhi: string; ganWx: Wx; zhiWx: Wx; shiShenGan: string; shiShenZhi: string[];
   hideGan: string[]; naYin: string; diShi?: string; unknown?: boolean;
@@ -38,15 +48,20 @@ export interface LlmMessage { role: 'user' | 'assistant'; content: string }
 /** 服务端推送的事件（SSE / JSON 回放 / 轮询 共用） */
 export type ChatEvent =
   | ['text', { text: string }] | ['delta', { text: string }] | ['bubble', Record<string, never>]
-  | ['chart', { chart: Chart }] | ['pending', { pending: Profile }]
+  | ['chart', { chart: Chart }] | ['pending', { pending: Profile | null }]
+  | ['switch', { profileId: string; label: string }] | ['compat', CompatCard]
   | ['profile', { profile: Profile }] | ['quick', { replies: string[] }] | ['error', { error: string }]
   | ['crisis', Record<string, never>] | ['ping', Record<string, never>] | ['done', { source?: string }];
 export type ChatEventName = ChatEvent[0];
 
-export interface ChatRequest { cid?: string; messages: LlmMessage[]; pending: Profile | null; profile: Profile | null; action?: 'confirm'; nowYear?: number; ui?: 'card' | 'text' }
+export interface ChatRequest { cid?: string; profileId?: string; messages: LlmMessage[]; pending: Profile | null; profile: Profile | null; action?: 'confirm'; nowYear?: number; ui?: 'card' | 'text' }
 
 export type ChatItem =
   | { type: 'user'; text: string } | { type: 'bot'; text: string }
-  | { type: 'chart'; chart: Chart }
-  /** 生辰确认卡片：editing＝待确认（可编辑），confirmed＝已确认（折叠为摘要） */
-  | { type: 'confirm'; profile: Profile; status: 'editing' | 'confirmed'; id?: string };
+  /** stale：生辰更正前的旧盘（保留用于对比） */
+  | { type: 'chart'; chart: Chart; stale?: boolean }
+  /** 生辰确认卡片：editing＝待确认（可编辑），confirmed＝已确认（折叠为摘要），moved＝已为另一位命主单独建档；stale＝已被更正 */
+  | { type: 'confirm'; profile: Profile; status: 'editing' | 'confirmed' | 'moved'; id?: string; correction?: Profile['correction']; stale?: boolean; cid?: string }
+  /** 建议切换到已有命主 */
+  | { type: 'switch'; profileId: string; label: string }
+  | { type: 'compat'; card: CompatCard };

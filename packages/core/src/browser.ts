@@ -4,3 +4,4 @@ export * from './sse';
 export * from './client';
 export * from './text';
 export * from './chatState';
+export * from './diff';
