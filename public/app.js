@@ -30,15 +30,21 @@
   }
   // 把一段长回答按"## 标题"拆成多个气泡
   const splitSections = (text) => text.split(/\n(?=#{1,4}\s)/).map((s) => s.trim()).filter(Boolean);
+  const AVATAR = '<img class="avatar" src="assets/logo.svg" alt="" width="36" height="36" />';
   function row(me, inner, cls = '') {
     const r = document.createElement('div');
-    r.className = 'row' + (me ? ' me' : '');
-    r.innerHTML = (me ? '<div class="spacer"></div>' : '<div class="avatar">师</div>') + `<div class="${cls || 'bubble'}">${inner}</div>`;
-    list.appendChild(r); return r;
+    const prev = list.lastElementChild;
+    const cont = !me && prev && prev.classList.contains('row') && !prev.classList.contains('me');
+    r.className = 'row' + (me ? ' me' : '') + (cont ? ' cont' : '');
+    r.innerHTML = (me ? '<div class="spacer"></div>' : AVATAR) + `<div class="${cls || 'bubble'}">${inner}</div>`;
+    list.appendChild(r);
+    if (cls === 'card') requestAnimationFrame(() => r.querySelectorAll('[data-w]').forEach((el) => (el.style.width = el.dataset.w + '%')));
+    return r;
   }
+  const sectionCls = (s) => (/^#{1,4}\s/.test(s) ? 'bubble section' : 'bubble');
   function renderItem(it) {
     if (it.type === 'user') return row(true, esc(it.text).replace(/\n/g, '<br>'));
-    if (it.type === 'bot') return splitSections(it.text).map((s) => row(false, md(s)));
+    if (it.type === 'bot') return splitSections(it.text).map((s) => row(false, md(s), sectionCls(s)));
     if (it.type === 'chart') return row(false, chartCard(it.chart), 'card');
   }
   function renderAll() {
@@ -57,18 +63,22 @@
   const ZOD = { 鼠: '🐭', 牛: '🐮', 虎: '🐯', 兔: '🐰', 龙: '🐲', 蛇: '🐍', 马: '🐴', 羊: '🐑', 猴: '🐵', 鸡: '🐔', 狗: '🐶', 猪: '🐷' };
   function chartCard(c) {
     const P = c.pillars, wx = (w, t) => `<span class="wx-${w}">${t}</span>`;
-    const r = (label, fn, cls = '') => `<div class="rl">${label}</div>` + P.map((p, i) => `<div class="${cls} ${i === 2 ? 'day' : ''}">${p.unknown ? '—' : fn(p)}</div>`).join('');
-    const maxC = Math.max(...Object.values(c.wuXingCount), 1);
+    const r = (label, fn, cls = '') => `<div class="rl">${label}</div>` + P.map((p, i) => `<div class="${cls}${i === 2 ? ' day' : ''}">${p.unknown ? '<small>—</small>' : fn(p)}</div>`).join('');
+    const total = Object.values(c.wuXingCount).reduce((a, b) => a + b, 0) || 1, maxC = Math.max(...Object.values(c.wuXingCount), 1);
     const cur = c.daYun.find((d) => c.nowYear >= d.startYear && c.nowYear <= d.endYear);
-    return `<div class="mp-h"><b>${esc(c.input.name || '缘主')}的命盘<span class="tag">${c.input.gender === '男' ? '乾造' : '坤造'}</span></b><span style="font-size:22px">${ZOD[c.shengXiao] || ''}</span></div>
-      <div class="meta">公历 ${c.input.clockTime.slice(0, c.input.timeUnknown ? 10 : 16)}${c.input.timeUnknown ? '（时辰不详）' : ''}${c.trueSolar ? `<br>真太阳时 ${c.trueSolar.time.slice(11, 16)}（${esc(c.trueSolar.city)}）` : ''}<br>农历 ${c.lunar}<br>生肖${c.shengXiao} · ${c.xingZuo}</div>
-      <div class="pillars"><div class="rl hd"></div>${P.map((p) => `<div class="hd">${p.label[0]}</div>`).join('')}
-        ${r('十神', (p) => p.shiShenGan)}${r('天干', (p) => wx(p.ganWx, p.gan), 'big')}${r('地支', (p) => wx(p.zhiWx, p.zhi), 'big')}
-        ${r('藏干', (p) => p.hideGan.join(''))}${r('纳音', (p) => p.naYin)}</div>
-      <div class="wx">${Object.entries(c.wuXingCount).map(([k, v]) => `<div><div class="b"><i class="bg-${k}" style="height:${v ? 15 + (v / maxC) * 85 : 5}%"></i></div>${wx(k, k)}${v}</div>`).join('')}</div>
-      <div class="kv"><span>日主 <b>${c.dayMaster.gan}${c.dayMaster.wuXing}</b> ${c.dayMaster.strength}</span><span>喜用 <b>${c.xiYong.join('')}</b></span><span>${c.missing.length ? '缺 <b>' + c.missing.join('') + '</b>' : '五行<b>俱全</b>'}</span><span>${c.yun.startYear}岁起运·${c.yun.forward ? '顺' : '逆'}</span></div>
+    const time = c.input.timeUnknown ? '时辰不详' : c.input.clockTime.slice(11, 16);
+    return `<div class="mp-h"><b>${esc(c.input.name || '缘主')}之命盘<span class="seal">${c.input.gender === '男' ? '乾造' : '坤造'}</span></b><span class="zodiac" aria-label="${c.shengXiao}">${ZOD[c.shengXiao] || ''}</span></div>
+      <div class="meta"><em>公历</em> ${c.input.clockTime.slice(0, 10)} ${time}${c.trueSolar ? ` · <em>真太阳时</em> ${c.trueSolar.time.slice(11, 16)}` : ''}<br><em>农历</em> ${c.lunar}<br><em>生肖</em> ${c.shengXiao} · <em>星座</em> ${c.xingZuo}</div>
+      <div class="pillars"><div class="hd rl"></div>${P.map((p, i) => `<div class="hd${i === 2 ? ' day' : ''}">${p.label}</div>`).join('')}
+        ${r('十神', (p) => `<span class="ss">${p.shiShenGan === '日主' ? (c.input.gender === '男' ? '元男' : '元女') : p.shiShenGan}</span>`)}
+        ${r('天干', (p) => wx(p.ganWx, p.gan), 'big')}${r('地支', (p) => wx(p.zhiWx, p.zhi), 'big')}
+        ${r('藏干', (p) => p.hideGan.map((g, k) => `${wx({ 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' }[g], g)}<small>${p.shiShenZhi[k]}</small>`).join(''))}
+        ${r('纳音', (p) => p.naYin)}</div>
+      <div class="sec">五行</div>
+      <div class="wx">${Object.entries(c.wuXingCount).map(([k, v]) => `<div class="w"><b class="wx-${k}">${k}</b><div class="t"><i class="bg-${k}" data-w="${v ? Math.round(12 + (v / maxC) * 88) : 0}"></i></div><span class="n">${v}</span></div>`).join('')}</div>
+      <div class="kv"><span>日主 <b>${c.dayMaster.gan}${c.dayMaster.wuXing}</b> · ${c.dayMaster.strength}</span><span>喜用 <b>${c.xiYong.join(' ')}</b></span><span>${c.missing.length ? '五行缺 <b>' + c.missing.join(' ') + '</b>' : '五行<b>俱全</b>'}</span><span>${c.yun.startYear}岁${c.yun.startMonth ? c.yun.startMonth + '个月' : ''}起运 · ${c.yun.forward ? '顺行' : '逆行'}</span></div>
       <div class="sec">大运</div>
-      <div class="hs">${c.daYun.slice(0, 8).map((d) => `<div class="dy ${d === cur ? 'cur' : ''}">${d.startAge}岁<b>${wx(GWX[d.ganZhi[0]], d.ganZhi[0])}${wx(ZWX[d.ganZhi[1]], d.ganZhi[1])}</b>${d.startYear}</div>`).join('')}</div>`;
+      <div class="hs">${c.daYun.slice(0, 8).map((d) => `<div class="dy${d === cur ? ' cur' : ''}">${d.startAge}岁<b>${wx(GWX[d.ganZhi[0]], d.ganZhi[0])}${wx(ZWX[d.ganZhi[1]], d.ganZhi[1])}</b>${d.startYear}</div>`).join('')}</div>`;
   }
 
   // ---------- 发送 ----------
@@ -90,7 +100,7 @@
     const paint = () => {
       const secs = splitSections(stream.text);
       while (stream.rows.length < secs.length) stream.rows.push(row(false, ''));
-      secs.forEach((s, i) => { const b = stream.rows[i].querySelector('.bubble'); b.innerHTML = md(s); b.classList.toggle('caret', i === secs.length - 1); });
+      secs.forEach((s, i) => { const b = stream.rows[i].querySelector('.bubble'); b.innerHTML = md(s); b.className = sectionCls(s) + (i === secs.length - 1 ? ' caret' : ''); });
       scroll();
     };
     const on = (ev, d) => {
@@ -140,6 +150,14 @@
     const t = S.quick[+b.dataset.i];
     if (t === '对，开始排盘' && S.pending) send(t, 'confirm'); else send(t);
   });
-  $('#reset').onclick = () => { if (busy) return; if (!S.profile && S.items.length <= 2 || confirm('开始为新的一位排盘？当前对话会清空。')) { S = fresh(); save(); renderAll(); input.focus(); } };
+  // 新排盘：不用浏览器弹窗，二次点击确认
+  const resetBtn = $('#reset'); let armed = null;
+  resetBtn.onclick = () => {
+    if (busy) return;
+    const trivial = !S.profile && S.items.length <= 2;
+    if (!trivial && !armed) { resetBtn.textContent = '确定清空？'; resetBtn.classList.add('warn'); armed = setTimeout(() => { armed = null; resetBtn.textContent = '新排盘'; resetBtn.classList.remove('warn'); }, 3000); return; }
+    clearTimeout(armed); armed = null; resetBtn.textContent = '新排盘'; resetBtn.classList.remove('warn');
+    S = fresh(); save(); renderAll(); input.focus();
+  };
   renderAll();
 })();

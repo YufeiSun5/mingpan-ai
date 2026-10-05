@@ -20,7 +20,8 @@
 ## 目录
 
 ```
-public/            聊天前端（index.html / style.css / app.js / config.js）
+public/            聊天前端（index.html / style.css / app.js / config.js / terms.html / robots.txt / manifest / assets/）
+lib/security.js    安全响应头（CSP、HSTS 等）
 lib/chat.js        聊天流程：提取 → 确认 → 排盘 → 流式详批 → 追问
 lib/parse.js       规则版出生信息解析（无 Key 时兜底）
 lib/bazi.js        排盘（四柱、十神、五行旺衰、喜用神、大运、流年、刑冲合）
@@ -37,7 +38,8 @@ style/style-guide.md   ★ 文风指南
 style/examples/        ★ 往期解读范例（.md/.txt，按文件名排序取前 3 篇）
 scripts/draft-style-guide.js  从聊天记录/解读文本自动起草文风指南
 scripts/test-charts.js        排盘正确性自测
-scripts/screenshot.js         聊天界面手机截图（走真实后端）
+scripts/screenshot.js         聊天界面手机截图（走真实后端，顺带检查外部请求/CSP 报错）
+scripts/make-icons.js         由 SVG 生成 PNG 图标与 og 分享图
 scripts/chat-demo.js          端到端聊天演示，输出 samples/chat-transcript.md
 scripts/gen-samples.js        生成两份样例详批到 samples/
 functions/cloudbase/   腾讯云 CloudBase 云函数入口
@@ -100,7 +102,7 @@ npm test                 # 排盘自测（4 个已知命例）
   1. 「静态网站托管」上传 `public/` 目录；
   2. 新建云函数（Node 18+），把整个项目（含 `node_modules`、`lib/`、`prompts/`、`style/`）打包上传，入口 `functions/cloudbase/index.main`，超时调到 60 秒；在函数配置里添加环境变量 `DEEPSEEK_API_KEY`；
   3. 「HTTP 访问服务」给函数绑定路径（如 `/bazi`）；
-  4. 修改 `public/config.js`：`window.API_BASE = 'https://<环境默认域名>/bazi'`（前端会请求 `/bazi/api/reading`），重新上传。
+  4. 修改 `public/config.js`：`window.API_BASE = 'https://<环境默认域名>/bazi'`（前端会请求 `/bazi/api/chat`），重新上传。注意：静态托管平台不会带上 `lib/security.js` 的安全头，如需要可在平台的「自定义响应头」里配置同样的 CSP；若前端仍由 `server.js` 提供而 API 在别的域名，设置 `CSP_CONNECT_SRC=https://api域名`，API 端设置 `CORS_ORIGIN=前端域名`。
 - 做法二：「云托管」直接用项目里的 `Dockerfile` 部署（监听 80 端口），前后端一体。注意云托管按 CPU/内存用量扣资源点，免费体验环境额度有限。
 
 **2. 阿里云函数计算 FC 3.0**
@@ -119,10 +121,26 @@ npm test                 # 排盘自测（4 个已知命例）
 ## 接口保护
 - 按 IP 限流（`/api/chat`、`/api/reading`）：`RATE_LIMIT_PER_MIN`（默认 8 次/分钟）、`RATE_LIMIT_PER_DAY`（默认 100 次/天），超出返回 429。内存计数，单实例有效；多实例部署建议再加网关限流。
 - 请求体上限：`MAX_BODY_BYTES`（默认 64KB，含对话历史），超出返回 413；服务端只取最近 20 条消息，单条用户消息截断到 500 字。
-- 部署在反向代理/网关后面时设置 `TRUST_PROXY=1` 以识别真实 IP。
+- 默认 `trust proxy = 1`（信任一跳代理，隧道/网关后也能拿到真实 IP）；直接暴露公网且无代理时可设 `TRUST_PROXY=false`。
 
 ## 样例
 `samples/` 下：两份真实大模型详批（含排盘数据、耗时和 token 用量，`node scripts/gen-samples.js`），以及一段完整聊天记录 `chat-transcript.md`（`node scripts/chat-demo.js`）。
+
+## 如何降低被微信 / 小红书 / 浏览器拦截的概率
+
+**代码层面已做的（只能"减分"，不能保证不被拦）：**
+- 所有资源同源：无外部 CDN、无第三方字体（标题字体为自托管的思源宋体子集 `public/assets/xz-display.woff2`，约 73KB，SIL OFL 授权）、无统计/广告/追踪代码、无 Cookie；头像、图标、纹理均为自制 SVG / 内联数据。
+- 安全响应头（`lib/security.js`）：CSP（`default-src 'self'`、禁止内联脚本、`frame-ancestors 'none'`）、`X-Content-Type-Options`、`Referrer-Policy`、`X-Frame-Options`、`Permissions-Policy`；HTTPS 下自动加 HSTS。SSE 流式不受影响。
+- 页面元信息齐全：charset、viewport、title、description、theme-color、favicon、apple-touch-icon、manifest、og 分享图；有 `robots.txt` 和《用户协议与隐私说明》（`terms.html`）。
+- 措辞：标题与界面用"玄真 · 国学命理 / 传统文化 · 生辰解读"，避免"算命"等敏感词，保留"仅供娱乐参考"免责声明。
+- 无弹窗、无跳转、JS 未混淆；默认 `trust proxy = 1`，限流按真实客户端 IP 计算。
+
+**真正决定会不会被拦的（代码管不了）：**
+1. **不要用 trycloudflare 随机域名对外**：`*.trycloudflare.com` 是公共免费隧道域名，常被微信/小红书标记为风险或直接拦截，而且从大陆访问不稳定、重启即换地址。只适合自己测试。
+2. **正式做法：备案域名 + HTTPS + 国内云**。在腾讯云 / 阿里云买域名、完成 ICP 备案，部署到 CloudBase / 云托管 / 函数计算并绑定该域名，开启 HTTPS 证书（两家都有免费 DV 证书）。备案域名 + 国内机房，是微信内能正常打开的前提。
+3. **被微信拦了就申诉**：微信打开显示"已停止访问该网页"时，可在微信的"网址安全检测/申诉"入口（腾讯安全中心 / 拦截页底部的申诉链接）提交说明。页面内容保持"传统文化、娱乐参考"的定位更容易通过。
+4. **小红书限制外链**：笔记正文、评论里放链接会被折叠、限流甚至违规处理。建议把入口放在**主页简介 / 私信**里，或做成**微信小程序**，在笔记里引导"私信获取"。
+5. 内容审核层面：命理/占卜类在各平台都属敏感类目，宣传文案避免"改命、转运、灵验、保证"等承诺性词语。
 
 ## 已知限制
 - 旺衰/喜用神使用简化的"扶抑法"打分（天干 + 藏干权重 × 月令系数），对从格、化气格等特殊格局不做判断；需要更精细的可在 `lib/bazi.js` 调整。

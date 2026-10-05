@@ -1,0 +1,2 @@
+xz-display.woff2 是 Noto Serif CJK SC Bold 的子集（仅含界面标题用字），
+版权 © 2017 Adobe (http://www.adobe.com/)，以 SIL Open Font License 1.1 授权：https://openfontlicense.org

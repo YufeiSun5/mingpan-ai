@@ -6,18 +6,31 @@ const { handleReading, handleChart } = require('./lib/handler');
 const { handleChat } = require('./lib/chat');
 const { getProvider } = require('./lib/llm');
 const rateLimit = require('./lib/ratelimit');
+const { securityHeaders } = require('./lib/security');
 
 const app = express();
-// 部署在反向代理/云网关后面时设置 TRUST_PROXY=1，才能拿到真实客户端 IP
-if (process.env.TRUST_PROXY) app.set('trust proxy', +process.env.TRUST_PROXY || process.env.TRUST_PROXY);
+app.disable('x-powered-by');
+// 位于反向代理 / 云网关 / 隧道之后：信任 1 跳代理，限流才能拿到真实客户端 IP，req.secure 才能识别 HTTPS
+const tp = process.env.TRUST_PROXY ?? '1';
+app.set('trust proxy', /^\d+$/.test(tp) ? +tp : tp === 'false' ? false : tp);
+app.use(securityHeaders);
 app.use(express.json({ limit: rateLimit.MAX_BODY_BYTES }));
-app.use((req, res, next) => { // 前后端分离部署时允许跨域
-  res.set('Access-Control-Allow-Origin', process.env.CORS_ORIGIN || '*');
+if (process.env.CORS_ORIGIN) app.use((req, res, next) => { // 仅在前后端分离部署时开启跨域（填前端域名）
+  res.set('Access-Control-Allow-Origin', process.env.CORS_ORIGIN);
   res.set('Access-Control-Allow-Headers', 'Content-Type');
+  res.set('Vary', 'Origin');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
+app.get('/favicon.ico', (req, res) => res.type('image/png').sendFile(path.join(__dirname, 'public/assets/icon-32.png'), { maxAge: '7d' }));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, file) {
+    if (/\.html$/.test(file)) res.set('Cache-Control', 'no-cache');
+    else if (/[\\/]assets[\\/]/.test(file)) res.set('Cache-Control', 'public, max-age=604800');
+    else res.set('Cache-Control', 'public, max-age=3600');
+    if (/\.webmanifest$/.test(file)) res.type('application/manifest+json');
+  },
+}));
 
 const wrap = (fn) => async (req, res) => {
   try { res.json(await fn(req.body)); }
