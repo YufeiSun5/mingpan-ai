@@ -54,7 +54,7 @@ export function App() {
         <div className="jump-anchor">{showJump && <button type="button" className="jump" onClick={jump}>↓ 新消息</button>}</div>
         {!busy && !editingCard && state.quick.length > 0 && <QuickReplies items={state.quick} onPick={onPick} />}
         <Composer disabled={busy} onSend={onSend} />
-        <footer className="foot"><a href="/terms.html">用户协议与隐私说明</a> · 内容由 AI 基于传统文化生成，仅供娱乐参考</footer>
+        <footer className="foot"><a href="/terms.html">用户协议与隐私说明</a><span className="foot-t"><span className="long">内容由 AI 基于传统文化生成，</span><span className="short">AI 生成 · </span>仅供娱乐参考</span></footer>
       </div>
       <ProfileSheet open={sheet} profiles={profiles} activeId={state.profileId} draft={!state.profileId} busy={busy} onClose={() => setSheet(false)} onPick={onSwitch} onAdd={onAdd} onRename={renameProfile} onDelete={removeProfile} />
       {latestChart && <aside className="side" aria-label="命盘"><div className="side-in"><div className="card side-card"><ChartCard c={latestChart.chart} open /></div></div></aside>}

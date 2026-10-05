@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 export function Composer({ disabled, onSend }: { disabled: boolean; onSend: (t: string) => void }) {
   const [v, setV] = useState('');
   const ta = useRef<HTMLTextAreaElement>(null);
-  const autosize = () => { const el = ta.current; if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 112) + 'px'; };
+  const autosize = () => { const el = ta.current; if (!el) return; el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 136) + 'px'; };
   const submit = (e?: React.FormEvent) => { e?.preventDefault(); const t = v.trim(); if (!t || disabled) return; setV(''); requestAnimationFrame(autosize); onSend(t); };
   return (
     <form className="composer" autoComplete="off" onSubmit={submit}>
