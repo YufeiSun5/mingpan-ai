@@ -85,7 +85,7 @@ function baseScores(chart, year) {
 
 // ---------- 问题健康度规则 ----------
 const RULES = [
-  { id: 'crisis', re: /(想死|不想活|活着没意思|活不下去|自杀|轻生|结束(自己的?)?生命|割腕|跳楼|跳河|烧炭|安眠药.*(吃|吞)|了结自己|去死)/, cap: 5, label: '危机信号' },
+  { id: 'crisis', re: /(结束这一切|就结束吧|今晚就结束|不想再醒|想解脱|一了百了|遗书|永别|想消失|活着好累|想死|不想活|活着没意思|活不下去|自杀|轻生|结束(自己的?)?生命|割腕|跳楼|跳河|烧炭|安眠药.*(吃|吞)|了结自己|去死)/, cap: 5, label: '危机信号' },
   { id: 'harm', re: /(报复|弄死|害(他|她|ta|死)|让(他|她|ta)(倒霉|出事|不得好死)|诅咒|下降头|扎小人|整死|搞垮|下蛊)/i, cap: 10, label: '伤害他人' },
   { id: 'force', re: /(不管用什么(办法|方法|手段)|不择手段|强行|逼(他|她)|控制(他|她)|让(他|她)离不开|和合术|情降|锁心|做法.*(回来|挽回))/, cap: 25, label: '强求他人意愿' },
   { id: 'gamble', re: /(赌|梭哈|全部(存款|积蓄|家当|身家)|所有(存款|积蓄)|all\s?in|押上(全部|一切)|一夜暴富|借钱.*(炒|投|博)|贷款.*(炒|投|博))/i, cap: 20, label: '赌博/孤注一掷' },
@@ -175,4 +175,25 @@ function buildCard(chart, ctx, raw?: any) {
 
 const CRISIS_TEXT = '先停一下，我想认真地跟你说几句。\n\n听起来你现在真的很难受、很累。这种时候，命盘不重要，**你这个人最重要**。你愿意说出来，已经很勇敢了。\n\n请现在就联系能陪你的人：\n- **全国心理援助热线：400-161-9995**（24 小时）\n- **心理援助热线：12356**\n- 如果有立即的危险，请拨打 **120 / 110**，或马上去最近的医院急诊\n\n也可以告诉身边信任的家人、朋友，让他们现在陪着你。难熬的时刻会过去的，你值得被好好照顾。我在这里，愿意听你慢慢说。';
 
+// 紧急危险信号：有计划、方法、时间或在告别
+const ACUTE_RE = /(遗书|遗言|告别|永别|再见了|下辈子|最后一次|来世|后事|已经(准备|买|写|想好)|准备好了|今晚.*(结束|走|死|跳|吃)|现在就.*(死|跳|走|吃)|(买|囤|攒)了.*(药|安眠药|炭|农药|绳)|安眠药|农药|烧炭|割腕|上吊|站在.*(楼顶|天台|桥|窗)|(楼顶|天台|桥上|窗边|河边)|刀片)/;
+const isAcute = (t: string) => ACUTE_RE.test(t || '');
+const GAN_WX2: Record<string, string> = { 甲: '木', 乙: '木', 丙: '火', 丁: '火', 戊: '土', 己: '土', 庚: '金', 辛: '金', 壬: '水', 癸: '水' };
+const ZHI_WX2: Record<string, string> = { 子: '水', 丑: '土', 寅: '木', 卯: '木', 辰: '土', 巳: '火', 午: '火', 未: '土', 申: '金', 酉: '金', 戌: '土', 亥: '水' };
+/** 从排盘数据里找"转运"依据：当前大运、下一步大运（是否喜用）、接下来的喜用流年 */
+function turningPoints(chart) {
+  const now = chart.nowYear, xi = chart.xiYong || [];
+  const fav = (gz: string) => [GAN_WX2[gz[0]], ZHI_WX2[gz[1]]].filter((w) => xi.includes(w)).length;
+  const cur = chart.daYun.find((d) => d.startYear <= now && d.endYear >= now);
+  const next = chart.daYun.find((d) => d.startYear > now);
+  const years = [...chart.liuNian, ...(chart.extraLiuNian || [])].filter((l) => l.year > now && l.year <= now + 6 && l.favorable > 0).slice(0, 3);
+  const lines = [];
+  if (cur) lines.push(`现在走${cur.ganZhi}大运（${cur.startYear}–${cur.endYear}，${cur.shiShen}），${fav(cur.ganZhi) ? `大运里有你的喜用${xi.join('')}` : '这步运偏辛苦，属于磨砺期'}`);
+  if (next) lines.push(`${next.startYear}年交入${next.ganZhi}大运（${next.shiShen}）${fav(next.ganZhi) ? `，喜用神${xi.filter((w) => [GAN_WX2[next.ganZhi[0]], ZHI_WX2[next.ganZhi[1]]].includes(w)).join('')}到位` : ''}，离现在${next.startYear - now}年`);
+  if (years.length) lines.push(`接下来对你有利的流年：${years.map((y) => `${y.year}${y.ganZhi}（${y.shiShen}，${y.ganWx}${y.zhiWx}为喜）`).join('、')}`);
+  const cy = chart.liuNian.find((l) => l.year === now);
+  if (cy) lines.push(`今年${cy.ganZhi}，${cy.favorable > 0 ? '本身是喜用之年，眼下的难是一时的' : cy.favorable < 0 ? '流年带忌神，所以这一年格外压人，但流年一过就松' : '平年'}`);
+  return { lines, next, years, cur };
+}
+export { isAcute, turningPoints };
 export { DIMS, baseScores, classify, isCrisis, pickDims, scorePrompt, buildCard, CRISIS_TEXT, levelOf };

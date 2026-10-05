@@ -119,7 +119,22 @@ async function streamText(messages, emit, fallbackText, opts: any = {}) {
   if (p.available) {
     try {
       const t0 = Date.now(); let first = 0;
-      const full = await chatStream(messages, (d) => { if (!first) first = Date.now() - t0; f.push(d); }, opts.llm || {});
+      // guard：先压住开头几十个字检查（如模型服务商的固定安全回复会出戏、热线号码也不对），命中则丢弃改用兜底
+      let head = '', held = !!opts.guard, rejected = false;
+      const full = await chatStream(messages, (d) => {
+        if (!first) first = Date.now() - t0;
+        if (rejected) return;
+        if (held) {
+          head += d;
+          if (head.length < 28) return;
+          held = false;
+          if (opts.guard.test(head)) { rejected = true; return; }
+          return f.push(head);
+        }
+        f.push(d);
+      }, opts.llm || {});
+      if (held && head) { if (opts.guard.test(head)) rejected = true; else f.push(head); }
+      if (rejected) { console.warn('[LLM stream] guard rejected:', head.slice(0, 40)); throw new Error('guard'); }
       f.end();
       const u = getLastUsage();
       console.log(`[LLM stream] ${p.name}:${p.model} first=${first}ms total=${Date.now() - t0}ms tokens=${u?.prompt_tokens}/${u?.completion_tokens}${u?.completion_tokens_details?.reasoning_tokens ? ' reasoning=' + u.completion_tokens_details.reasoning_tokens : ''}`);
@@ -130,6 +145,16 @@ async function streamText(messages, emit, fallbackText, opts: any = {}) {
   const text = fallbackText();
   for (let i = 0; i < text.length; i += 40) emit('delta', { text: text.slice(i, i + 40) });
   return { text, source: 'template' };
+}
+
+// 模型服务商的固定安全话术（出戏，且号码可能不对）
+const CANNED_RE = /(非常抱歉听到|很抱歉听到|强烈建议你|心理健康专业人士|当地的紧急|作为(一个)?(AI|人工智能)|我(只)?是(一个)?(AI|人工智能)|自杀是一个)/i;
+
+function crisisFallback(tp, acute) {
+  const hope = tp?.next ? `我刚又看了一眼你的盘，${tp.next.startYear}年你就交入${tp.next.ganZhi}运了${tp.years[0] ? `，${tp.years[0].year}年${tp.years[0].ganZhi}也是你的喜用之年` : ''}。眼下这一段是低谷，运是会转的，好日子在后头，你得在，才等得到。`
+    : '人这一辈子运是流动的，没有一直走背运的命。眼下这一段是低谷，会过去的。';
+  const urgent = '孩子，你先听师傅一句：现在就打 120 或 110，或者打 12356、400-161-9995，再马上去找你身边的人，家人、室友、邻居都行，别一个人待着，把药和危险的东西放远一点。\n\n';
+  return `${acute ? urgent : '嗯……你说的这些，师傅听到了。能撑到现在，已经很不容易了。\n\n'}${hope}\n\n最近是发生什么事了？愿意的话，慢慢跟我说说。\n\n${acute ? '打完电话回来跟师傅说一声，我在这儿等你。' : '今晚要是实在难受，给 12356 或者 400-161-9995 打个电话，有人陪你说说话，师傅也在这儿等你。'}`;
 }
 
 function yearsMentioned(text, nowYear) {
@@ -156,12 +181,26 @@ async function handleChat(body, emit, ctx: { memory?: string; onScore?: (s: any)
   const nowYear = ny || new Date().getFullYear();
   const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
 
-  // 0) 危机信号：不算命，先关心并给出专业求助渠道
+  // 0) 危机信号：大师不出戏，用命盘讲"低谷会过去"，自然地织入求助热线；紧急时优先让对方马上打电话、找身边的人
   if (action !== 'confirm' && SC.isCrisis(lastUser)) {
-    console.log('[chat] crisis signal');
+    const acute = SC.isAcute(lastUser);
+    console.log(`[chat] crisis signal${acute ? ' ACUTE' : ''}`);
+    let chart = null;
+    if (profile && missingOf(profile).length === 0) { try { chart = computeChart({ ...toInput(profile), nowYear }); } catch { chart = null; } }
+    const tp = chart ? SC.turningPoints(chart) : null;
+    const sys = fill(readTemplate('crisis.md').system, {
+      TURNING: tp?.lines.length ? `${chart.pillars.map((p) => p.gan + p.zhi).join(' ')}，日主${chart.dayMaster.gan}${chart.dayMaster.wuXing}，喜用${chart.xiYong.join('')}\n${tp.lines.join('\n')}` : '（还没有排盘，不要谈具体年份运势）',
+      NEXT_YEAR_HINT: tp?.next ? `${tp.next.startYear}年交入${tp.next.ganZhi}运` : tp?.years[0] ? `${tp.years[0].year}年${tp.years[0].ganZhi}是喜用之年` : '明年运势会松动',
+      ACUTE_RULE: acute
+        ? '6. 【紧急】对方的话里有具体的计划、方法或在告别，这是眼下的危险。第一段就要恳切而直接地请他现在、马上：拨打 120 或 110，或者打 12356 / 400-161-9995，并且立刻去找身边的人（家人、室友、邻居、楼下保安都行），离开危险的地方、把药和工具放远。语气是心疼和着急，不是命令和训斥。命盘转运只用一两句带过，最后请他打完电话回来跟师傅说一声。'
+        : '',
+      MEMORY: ctx.memory || '',
+    });
     emit('crisis', {});
-    emit('text', { text: SC.CRISIS_TEXT });
-    emit('quick', { replies: ['谢谢你，我想再聊聊', '我现在好一点了'] });
+    emit('bubble', {});
+    const fb = () => crisisFallback(tp, acute);
+    await streamText([{ role: 'system', content: sys }, ...messages.slice(-8)], emit, fb, { llm: { temperature: 0.7, maxTokens: 900 }, guard: CANNED_RE });
+    emit('quick', { replies: acute ? ['我打过电话了', '我身边有人了'] : ['嗯，我想说说发生了什么', '我现在好一点了'] });
     emit('done', {});
     return;
   }
