@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Chart, DaYun, LiuNian, ProColumn } from '@mingpan/core';
 import { SHEN_SHA_DESC } from '@mingpan/core';
 import { Bar } from './Grow';
@@ -29,7 +30,7 @@ function Header({ c }: { c: Chart }) {
 }
 
 function Grid({ cols, onSha, renYuan, shiChen }: {
-  cols: ProColumn[]; onSha: (name: string, col: ProColumn) => void; renYuan?: string; shiChen?: string;
+  cols: ProColumn[]; onSha: (col: ProColumn) => void; renYuan?: string; shiChen?: string;
 }) {
   const labels = ['主星', '天干', '地支', '藏干', '星运', '自坐', '空亡', '旬首', '纳音', '神煞'];
   const cell = (col: ProColumn, row: string) => {
@@ -54,14 +55,13 @@ function Grid({ cols, onSha, renYuan, shiChen }: {
       case '旬首': return <span className="ny"><W c={col.xunShou?.[0]} /><W c={col.xunShou?.[1]} /></span>;
       case '纳音': return <span className="ny-t">{col.naYin}</span>;
       case '神煞': {
-        // 全量显示，不截断；每个神煞可点看释义（弹层同时列出本列全部神煞，误触也能看到目标）
+        // 全量显示，不截断；整格是一个点按目标（≥48px），弹层列出本列全部神煞及释义
         const list = col.shenSha || [];
+        if (!list.length) return <i className="na">—</i>;
         return (
-          <span className="sha-list">
-            {list.length ? list.map((n) => (
-              <button type="button" key={n} className="sha-chip" onClick={() => onSha(n, col)}>{n}</button>
-            )) : <i className="na">—</i>}
-          </span>
+          <button type="button" className="sha-cell" aria-label={`${col.label}神煞：${list.join('、')}，点按看释义`} onClick={() => onSha(col)}>
+            {list.map((n) => <i key={n} className="sha-chip">{n}</i>)}
+          </button>
         );
       }
       default: return null;
@@ -79,7 +79,7 @@ function Grid({ cols, onSha, renYuan, shiChen }: {
         ))}
       </div>
       {labels.map((row) => (
-        <div key={row} className={`mp-row${row === '天干' || row === '地支' ? ' tall' : ''}${row === '藏干' || row === '神煞' ? ' multi' : ''}`} role="row">
+        <div key={row} className={`mp-row${row === '天干' || row === '地支' ? ' tall' : ''}${row === '藏干' || row === '神煞' ? ' multi' : ''}${row === '神煞' ? ' sha' : ''}`} role="row">
           <div className="mp-lab" role="rowheader">{row}</div>
           {cols.map((c) => <div key={c.label + row} className={`mp-cel${c.label === '流年' || c.label === '大运' ? ' soft' : ''}`} role="cell">{cell(c, row)}</div>)}
         </div>
@@ -156,7 +156,7 @@ export function ChartCard({ c, open }: { c: Chart; open?: boolean }) {
   }, [dyKey]); // eslint-disable-line
   const ln = lnList.find((y) => y.year === lnYear) || lnList[0];
   const [moreOpen, setMoreOpen] = useState(!!open);
-  const [tip, setTip] = useState<{ name: string; col: ProColumn } | null>(null);
+  const [tip, setTip] = useState<ProColumn | null>(null);
 
   const cols: ProColumn[] = useMemo(() => {
     if (!pro) return [];
@@ -183,7 +183,7 @@ export function ChartCard({ c, open }: { c: Chart; open?: boolean }) {
   return (
     <div className="chart mp">
       <Header c={c} />
-      <Grid cols={cols} onSha={(name, col) => setTip({ name, col })}
+      <Grid cols={cols} onSha={(col) => setTip(col)}
         renYuan={pro.renYuan} shiChen={(c.lunar.match(/([子丑寅卯辰巳午未申酉戌亥]时)/) || [])[1]} />
       <Palace c={c} />
       <div className="mp-sec">大运</div>
@@ -202,23 +202,20 @@ export function ChartCard({ c, open }: { c: Chart; open?: boolean }) {
         <div className="wxc" style={{ marginTop: 10 }}>{(Object.entries(c.wuXingCount) as [string, number][]).map(([k, v]) => <span key={k} className={`chip bg-${k}`}><b>{k}</b>{v}</span>)}</div>
       </details>
 
-      {tip && (
+      {tip && createPortal(
         <div className="sha-tip" role="dialog" onClick={() => setTip(null)}>
           <div className="sha-tip-card" onClick={(e) => e.stopPropagation()}>
-            <b>{tip.name}</b>
-            <p>{SHEN_SHA_DESC[tip.name] || '传统神煞，仅供文化参考。'}</p>
-            {(tip.col.shenSha || []).length > 1 && (
-              <div className="sha-tip-all">
-                <small>{tip.col.label.replace('柱', '柱')} {tip.col.gan}{tip.col.zhi} 全部神煞</small>
-                <ul>{(tip.col.shenSha || []).map((n) => (
-                  <li key={n} className={n === tip.name ? 'on' : undefined}><b>{n}</b>{SHEN_SHA_DESC[n] || '传统神煞，仅供文化参考。'}</li>
-                ))}</ul>
-              </div>
-            )}
+            <b>{tip.label} · <span className="gz">{tip.gan}{tip.zhi}</span></b>
+            <div className="sha-tip-all">
+              <small>本列神煞 {(tip.shenSha || []).length} 个</small>
+              <ul>{(tip.shenSha || []).map((n) => (
+                <li key={n}><b>{n}</b>{SHEN_SHA_DESC[n] || '传统神煞，仅供文化参考。'}</li>
+              ))}</ul>
+            </div>
             <button type="button" className="sha-tip-ok" onClick={() => setTip(null)}>知道了</button>
           </div>
         </div>
-      )}
+      , document.body)}
     </div>
   );
 }
