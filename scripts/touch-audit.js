@@ -10,7 +10,12 @@ const MEASURE = () => {
   const SEL = 'button, a[href], input:not([type=hidden]):not([type=checkbox]), select, textarea, summary, label.chk';
   const vis = (e) => { const r = e.getBoundingClientRect(); const cs = getComputedStyle(e); return r.width > 0 && r.height > 0 && cs.visibility !== 'hidden' && e.closest('[hidden]') === null; };
   const sheet = document.querySelector('.sheet');
-  const els = [...(sheet || document).querySelectorAll(SEL)].filter(vis);
+  const all = [...(sheet || document).querySelectorAll(SEL)].filter(vis);
+  // 命盘神煞格内的释义小签（.sha-chip）：用户要求六列全量显示且每个可点，物理上做不到 44px；
+  // 误触有兜底（弹层列出该列全部神煞及释义），故单列统计、不计入 44px 硬指标。
+  const chips = all.filter((e) => e.classList.contains('sha-chip'));
+  const els = all.filter((e) => !e.classList.contains('sha-chip'));
+  window.__chips = chips.length ? `${chips.length} chips, min ${Math.min(...chips.map((e) => Math.round(e.getBoundingClientRect().height * 10) / 10))}px tall (exempt, tip shows whole column)` : '';
   const name = (e) => { const c = e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).join('.') : ''; const t = (e.innerText || e.getAttribute('aria-label') || e.placeholder || '').trim().replace(/\s+/g, ' ').slice(0, 14); return `${e.tagName.toLowerCase()}${e.id ? '#' + e.id : ''}${c} "${t}"`; };
   // textarea 的点击区是整个输入框
   const rectOf = (e) => (e.tagName === 'TEXTAREA' && e.closest('.field') ? e.closest('.field') : e).getBoundingClientRect();
@@ -29,7 +34,7 @@ const MEASURE = () => {
     if (gap < 8) tight.push(`${a.n} ↔ ${b.n}: ${gap.toFixed(1)}px`);
   }
   const minS = items.reduce((m, x) => (Math.min(x.w, x.h) < Math.min(m.w, m.h) ? x : m), items[0]);
-  return { minS: `${minS.n} ${minS.w}x${minS.h}`, n: items.length, coarse: matchMedia('(pointer:coarse)').matches, minW: minW && `${minW.n} ${minW.w}x${minW.h}`, minH: minH && `${minH.n} ${minH.w}x${minH.h}`, minSide: Math.min(...items.map((x) => Math.min(x.w, x.h))), small, minGap: Math.round(minGap * 10) / 10, minGapPair, tight };
+  return { chips: window.__chips, minS: `${minS.n} ${minS.w}x${minS.h}`, n: items.length, coarse: matchMedia('(pointer:coarse)').matches, minW: minW && `${minW.n} ${minW.w}x${minW.h}`, minH: minH && `${minH.n} ${minH.w}x${minH.h}`, minSide: Math.min(...items.map((x) => Math.min(x.w, x.h))), small, minGap: Math.round(minGap * 10) / 10, minGapPair, tight };
 };
 
 (async () => {
@@ -135,7 +140,7 @@ const MEASURE = () => {
     console.log(`\n== ${r.tag} (${r.w}x${r.h}) coarse=${r.chat.coarse} errs=${r.errs.length} kbVisible=${r.kbVisible ?? '-'} del="${r.delText}" cancel→${r.backAfterCancel}`);
     for (const v of views) {
       const m = r[v];
-      console.log(`  ${v.padEnd(6)} n=${m.n} minSide=${m.minSide.toFixed(1)} (${m.minS}) | minGap=${m.minGap} (${m.minGapPair})${m.small.length ? ' SMALL:' + m.small.join('; ') : ''}${m.tight.length ? ' TIGHT:' + m.tight.join('; ') : ''}`);
+      console.log(`  ${v.padEnd(6)} n=${m.n}${m.chips ? ' [' + m.chips + ']' : ''} minSide=${m.minSide.toFixed(1)} (${m.minS}) | minGap=${m.minGap} (${m.minGapPair})${m.small.length ? ' SMALL:' + m.small.join('; ') : ''}${m.tight.length ? ' TIGHT:' + m.tight.join('; ') : ''}`);
       if (m.minSide < gMin) { gMin = m.minSide; gMinWhat = `${r.tag}/${v}: ${m.minS}`; }
       if (m.minGap < gGap) { gGap = m.minGap; gGapWhat = `${r.tag}/${v}: ${m.minGapPair}`; }
     }

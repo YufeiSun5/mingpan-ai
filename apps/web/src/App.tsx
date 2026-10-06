@@ -46,6 +46,11 @@ export function App() {
             <h1>玄真 · 国学命理</h1>
             <p>以传统历法排四柱 · 观五行大运流年</p>
             <div className="hero-rule"><i /><span>仅供娱乐参考</span><i /></div>
+            {!state.items.length && <ul className="hero-tips" aria-label="使用方式">
+              <li><b>一 · 报生辰</b><span>公历农历皆可，时辰不详也能排</span></li>
+              <li><b>二 · 核对排盘</b><span>确认无误后排出专业细盘</span></li>
+              <li><b>三 · 随时追问</b><span>事业感情、大运流年、多人合盘</span></li>
+            </ul>}
           </section>
           {items.map((it, i) => <Item key={i} it={it} cont={i > 0 && items[i - 1].type !== 'user' && it.type !== 'user'} busy={busy} locked={it.type === 'confirm' && it.status === 'confirmed' && i !== lastConfirmIdx} onConfirm={onConfirm} onSwitch={onSwitch} />)}
           {state.stream !== null && <Streaming text={state.stream} cont={lastIsBot} />}

@@ -93,7 +93,7 @@ export function ConfirmCard({ profile, status, busy, locked, stale, correction, 
   return (
     <form className="cf edit" onSubmit={(e) => { e.preventDefault(); submit(); }}>
       <div className="cf-h">{status === 'confirmed' || correction ? '修改生辰' : '核对生辰'}<span>改好后直接排盘</span></div>
-      <div className="cf-f"><label>命主</label>
+      <div className="cf-f wide"><label>命主</label>
         <div className="cf-in col">
           <input className="city" aria-label="命主称呼" placeholder="这是谁的盘：我 / 老公 / 妈妈 / 朋友…" maxLength={8} value={d.label || ''} disabled={status === 'confirmed' && !!profile.id} onChange={(e) => set({ label: e.target.value })} />
           {!(status === 'confirmed' && profile.id) && <div className="chips">{LABELS.map((l) => <button type="button" key={l} className={d.label === l ? 'on' : ''} onClick={() => set({ label: l })}>{l}</button>)}</div>}
@@ -125,7 +125,7 @@ export function ConfirmCard({ profile, status, busy, locked, stale, correction, 
           {t.type === 'shichen' && <select aria-label="时辰" value={t.shichen} onChange={(e) => set({ time: { type: 'shichen', shichen: e.target.value } })}>{SHICHEN.map(([z, r]) => <option key={z} value={z}>{z}时（{r}）</option>)}</select>}
         </div>
       </div>
-      <div className={`cf-f ${chg(ch, 'city') || ''}`}><label>出生地</label><div className="cf-in"><input className="city" placeholder="如 成都（可不填）" maxLength={20} value={d.city || ''} onChange={(e) => set({ city: e.target.value })} /></div></div>
+      <div className={`cf-f wide ${chg(ch, 'city') || ''}`}><label>出生地</label><div className="cf-in"><input className="city" placeholder="如 成都（可不填）" maxLength={20} value={d.city || ''} onChange={(e) => set({ city: e.target.value })} /></div></div>
       {err && <p className="cf-err">{err}</p>}
       <div className="cf-act">
         <button type="submit" className="primary" disabled={busy || sending}>{sending ? '排盘中…' : status === 'confirmed' ? '重新排盘' : primary}</button>

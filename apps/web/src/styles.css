@@ -95,18 +95,14 @@ button,input,textarea{font-family:inherit}
 .sha-list{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%}
 .sha-list i{font-style:normal;font-size:9.5px;line-height:1.35;padding:0 3px;border-radius:4px;background:var(--surface2);color:var(--ink2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sha-list i.more-n{background:transparent;color:var(--zhu);font-size:9px}
-.sha-bar{display:flex;align-items:center;justify-content:center;width:100%;min-height:var(--tap);margin-top:6px;border:.5px solid var(--line2);border-radius:12px;background:var(--surface2);color:var(--zhu);font-size:13.5px;font-weight:600;letter-spacing:1px}
-.sha-bar:active{background:var(--zhu-soft)}
 
 /* 流年/大运列头高亮、神煞可点、司令徽章、弹层 */
 .mp-cel.hd.hi{color:var(--zhu);font-weight:700;background:var(--zhu-soft)}
 .mp-cel.soft{background:rgba(178,58,48,.03)}
 .seal.inline{display:inline;margin-left:6px;padding:1px 6px;vertical-align:1px}
-.sha-chip{font-style:normal;font-size:9.5px;line-height:1.35;padding:1px 4px;border-radius:4px;background:var(--surface2);color:var(--ink2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sha-chip{display:block;width:100%;border:0;margin:0;font:inherit;font-size:9.5px;line-height:1.3;padding:1px 2px;border-radius:4px;background:var(--surface2);color:var(--ink2);text-align:center;white-space:normal;word-break:break-all;cursor:pointer}
+.sha-chip:active,.sha-chip:hover{background:var(--zhu-soft);color:var(--zhu)}
 .sha-item{border:0;background:var(--surface2);color:var(--ink2);font-size:9.5px;line-height:1.35;padding:1px 4px;border-radius:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-height:auto;min-width:auto}
-.sha-panel{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px;padding:10px;background:var(--surface2);border-radius:12px}
-.sha-pick{min-height:var(--tap);padding:0 14px;border:0;border-radius:999px;background:var(--surface);color:var(--ink);font-size:13.5px;font-weight:500;box-shadow:0 1px 0 rgba(30,20,10,.06)}
-.sha-pick:active{background:var(--zhu-soft);color:var(--zhu)}
 .sha-item:active{background:var(--zhu-soft);color:var(--zhu)}
 .badge-sl i.sl{font-style:normal;font-family:var(--display);font-size:16px;color:var(--zhu);margin-left:2px}
 .mp-cel .hide i.si-ling{background:rgba(178,58,48,.08);border-radius:4px;padding:0 2px}
@@ -463,3 +459,57 @@ button{touch-action:manipulation;cursor:pointer}button:disabled{cursor:default}
 .old-chart .oc-more{color:var(--zhu);font-size:13.5px;padding-left:8px}
 .more summary{padding:4px 0;font-size:13.5px}
 .sw-btn{min-height:var(--tap-lg);padding:0 18px;font-size:15px}
+
+/* 神煞全量：竖排紧凑、可点；释义弹层列出本列全部神煞 */
+.sha-tip-card{max-height:min(80dvh,560px);overflow:auto;overscroll-behavior:contain}
+.sha-tip-all{margin:0 0 14px;padding-top:10px;border-top:.5px solid var(--line2)}
+.sha-tip-all small{display:block;font-size:11.5px;color:var(--ink3);margin-bottom:6px}
+.sha-tip-all ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.sha-tip-all li{font-size:13px;line-height:1.6;color:var(--ink2);padding:4px 8px;border-radius:8px}
+.sha-tip-all li.on{background:var(--zhu-soft)}
+.sha-tip-all li b{display:inline;font-family:var(--sans);font-size:13px;letter-spacing:0;margin:0 6px 0 0;color:var(--ink)}
+@media (max-width:375px){.sha-chip{font-size:8.5px;padding:1px 0;letter-spacing:-.3px}.sha-list{gap:1px}}
+.hero-tips{display:none}
+
+/* ---------- 宽屏 web：折叠屏展开视角（近方形画框居中，四周新中式底） ---------- */
+@media (min-width:900px) and (min-height:560px){
+  html,body{background:
+    radial-gradient(ellipse 60% 50% at 12% 8%,rgba(178,58,48,.07),transparent 70%),
+    radial-gradient(ellipse 55% 60% at 90% 92%,rgba(168,134,79,.12),transparent 70%),
+    repeating-linear-gradient(0deg,rgba(38,30,24,.028) 0 .5px,transparent .5px 22px),
+    repeating-linear-gradient(90deg,rgba(38,30,24,.028) 0 .5px,transparent .5px 22px),
+    #ece5d9}
+  #root{display:flex;align-items:center;justify-content:center;height:100dvh;padding:clamp(12px,2.6vh,32px) clamp(12px,3vw,48px)}
+  .shell{position:relative;width:min(1100px,100%);height:100%;max-height:1040px;border-radius:26px;overflow:hidden;background:var(--bg);
+    border:.5px solid rgba(168,134,79,.38);box-shadow:0 0 0 6px rgba(255,254,251,.45),0 0 0 6.5px rgba(168,134,79,.22),0 40px 90px -40px rgba(50,30,10,.45)}
+  .app{max-width:none;border-left:0;border-right:0}
+  .shell.has-chart .app{min-width:0}
+  .shell.has-chart .side{flex:0 0 clamp(380px,42%,470px);border-left:.5px solid var(--line2);background:linear-gradient(180deg,rgba(255,254,251,.5),rgba(250,247,241,.5));padding:16px 16px 24px}
+  .list{padding:16px clamp(24px,3vw,40px) 28px}
+  .row.me{margin-left:30%}
+  .bubble,.row.me .bubble{max-width:70%}
+  .row.me .bubble{max-width:100%}
+  .card{max-width:min(680px,calc(100% - 46px))}
+  .cf-card,.hp-card{max-width:min(680px,calc(100% - 46px))}
+  .sw-card{max-width:min(460px,calc(100% - 46px))}
+  .side-card,.row-chart .card{max-width:none}
+  .side{scrollbar-width:thin;scrollbar-gutter:stable}
+  .hero{padding:52px 0 18px}
+  .hero h1{font-size:24px;letter-spacing:10px}
+  .hero-tips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;list-style:none;margin:26px auto 4px;padding:0;max-width:720px;text-align:left}
+  .hero-tips li{background:var(--surface);border:.5px solid var(--line2);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:4px}
+  .hero-tips b{font-family:var(--display);font-size:14.5px;letter-spacing:2px;color:var(--ink)}
+  .hero-tips b::first-letter{color:var(--zhu)}
+  .hero-tips span{font-size:12.5px;line-height:1.6;color:var(--ink3)}
+  .shell.has-chart .hero-tips{grid-template-columns:1fr}
+  .composer,.quick,.foot{padding-left:clamp(24px,3vw,40px);padding-right:clamp(24px,3vw,40px)}
+}
+/* 确认/更正卡：卡片够宽时字段两列（容器查询，手机不受影响） */
+@container (min-width:600px){
+  .cf.edit{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px}
+  .cf.edit>.cf-h,.cf.edit>.cf-err,.cf.edit>.cf-act,.cf.edit>.cf-f.wide{grid-column:1/-1}
+  .cf.edit>.cf-f{align-items:start}.cf.edit>.cf-f>label{padding-top:8px}
+  .cf.edit input.city{max-width:420px}
+  .cf.edit .seg button{white-space:nowrap;padding-left:11px;padding-right:11px}
+  .cf-kv{grid-template-columns:52px minmax(0,1fr) 52px minmax(0,1fr)}
+}

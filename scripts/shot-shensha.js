@@ -63,7 +63,7 @@ const VPS = [
   const info = await p.evaluate(() => {
     const root = document.querySelector('.chart.mp');
     const text = root ? root.innerText : '';
-    const sha = [...document.querySelectorAll('.sha-item')].map((e) => e.textContent);
+    const sha = [...document.querySelectorAll('.sha-chip')].map((e) => e.textContent);
     return { text: text.slice(0, 1200), sha, hasKun: /坤造/.test(text), qiYun: (text.match(/起运[^\n]*/)||[])[0], jiao: (text.match(/交运[^\n]*/)||[])[0] };
   });
   console.log(JSON.stringify(info, null, 2));
@@ -99,7 +99,7 @@ const VPS = [
 
   // tap a 神煞
   await p.setViewportSize({ width: 390, height: 844 });
-  const shaBtn = await p.$('.sha-item');
+  const shaBtn = await p.$('.side .sha-chip, .row-chart .sha-chip');
   if (shaBtn) {
     await shaBtn.click();
     await p.waitForTimeout(300);
