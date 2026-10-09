@@ -485,7 +485,7 @@ async function handleChat(body, emit, ctx: ChatCtx = {}) {
       if (gate) gate.then((ok) => ok && emit('bubble', {})); else emit('bubble', {}); // 推测执行时，气泡也等意图判断后再出
       return streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx, onScore, gate });
     };
-    if (isCityAsk(q) && !CORR_RE.test(q) && !COMPAT_RE.test(q) && !PERSON_RE.test(q)) { await runCities(profile, q, messages, emit, { ...ctx, nowYear }); return; }
+    if (isCityAsk(q) && !CORR_RE.test(q) && !/合盘|合婚|合不合|配不配|般配|合得来|相配|八字合/.test(q) && !PERSON_RE.test(q)) { await runCities(profile, q, messages, emit, { ...ctx, nowYear }); return; }
     if (mightRoute(q)) {
       let release: (ok: boolean) => void;
       const gate = new Promise<boolean>((ok) => (release = ok));

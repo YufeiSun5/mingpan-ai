@@ -37,9 +37,16 @@ async function shots(p, tag) {
   await shots(p, 'cn');
   const t1 = await p.evaluate(() => [...document.querySelectorAll('.row:not(.me) .bubble')].slice(-6).map((x) => x.textContent).join('\n'));
   console.log('--- prose(cn) ---\n' + t1.slice(-1200));
-  await pick('也看看国外的城市');
-  await shots(p, 'abroad');
+  // 第二轮：切换海外/国内（服务端可能因所在地区已进入海外模式，此时第三个追问是「只看国内的城市」）
+  const second = (await p.$$eval('.quick button', (bs) => bs.map((x) => x.textContent))).find((t) => /国外|国内/.test(t));
+  console.log('second chip:', second);
+  await pick(second);
+  await shots(p, /国外/.test(second) ? 'abroad' : 'cnonly');
   const t2 = await p.evaluate(() => [...document.querySelectorAll('.row:not(.me) .bubble')].slice(-6).map((x) => x.textContent).join('\n'));
-  console.log('--- prose(abroad) ---\n' + t2.slice(-1200));
+  console.log('--- prose(2) ---\n' + t2.slice(-1200));
+  const all = await p.evaluate(() => document.querySelector('.list')?.innerText || document.body.innerText);
+  const leak = all.match(/IP|ip地址|定位|网络|所在(地区|城市|位置)|离你(现在)?(很)?近|你那边|你现在(所在|在的)|根据你的(位置|地区)/g);
+  console.log('LEAK CHECK:', leak ? leak.join(',') : 'none');
+  console.log('CARDS:', JSON.stringify(await p.$$eval('.ct-card', (cs) => cs.map((c) => [...c.querySelectorAll('.ct-t b')].map((b) => b.textContent).join('/')))));
   await b.close();
 })().catch((e) => { console.error(e); process.exit(1); });
