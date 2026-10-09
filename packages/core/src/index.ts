@@ -16,3 +16,5 @@ export { compatRelations, briefBazi } from './compat';
 export type { CompatResult } from './compat';
 
 export { computeShenSha, SHEN_SHA_DESC } from './shensha';
+export { CITY_CATALOG, scoreCityAgainstChart, recommendCities, placeCoord, cityChartBrief, moveYears, distKm, bearing8, PREF_KEYS } from './citycatalog';
+export type { CityInfo, CityPick, CityContext } from './citycatalog';

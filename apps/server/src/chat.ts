@@ -1,6 +1,6 @@
 // 聊天式流程：提取出生信息 → 确认 → 排盘 → 流式详批 → 追问对答
 // handleChat(body, emit) 与平台无关：emit(event, data) 由 Express(SSE) 或云函数(收集为数组) 实现。
-import { computeChart, checkDate, profileChanges, changeSentence, chartDiffText, compatRelations, briefBazi } from '@mingpan/core';
+import { computeChart, checkDate, profileChanges, changeSentence, chartDiffText, compatRelations, briefBazi, recommendCities, cityChartBrief, moveYears, placeCoord, CITY_CATALOG } from '@mingpan/core';
 import { buildReadingMessages, chartToText, readTemplate, fill, loadStyle } from './prompt';
 import { generateFallback } from '@mingpan/core';
 import { chat, chatStream, getProvider, getLastUsage } from './llm';
@@ -95,7 +95,7 @@ function suggestions(chart) {
   const n = chart.nowYear, love = chart.input.gender === '女' ? '我什么时候能遇到正缘？' : '我什么时候桃花运最好？';
   const past = chart.liuNian.filter((y) => y.past && y.relations.some((r) => /冲|刑|太岁/.test(r)) && y.favorable <= 0).pop()
     || chart.liuNian.filter((y) => y.past && y.relations.length).pop();
-  return [`${n + 1}年我能结婚吗？`, love, '我适合做什么工作？', past ? `${past.year}年是不是不太顺？` : `${n}年下半年运势怎么样？`];
+  return [`${n + 1}年我能结婚吗？`, love, '我适合做什么工作？', '我适合住哪个城市？', past ? `${past.year}年是不是不太顺？` : `${n}年下半年运势怎么样？`];
 }
 
 // 内部用语过滤：评分只在服务端用于引导回答，任何内部字眼都不能出现在可见文本里
@@ -352,7 +352,84 @@ async function runCompat(a, b, q, messages, emit, ctx: any = {}) {
   emit('done', { source: r.source });
 }
 
-interface ChatCtx { memory?: string; onScore?: (s: any) => void; current?: { id: string; label: string; data: any } | null; profiles?: { id: string; label: string; data: any }[] }
+// ---------- 宜居城市 / 发展方位 ----------
+// 触发：已排盘后问住哪、去哪发展、换城市、移民出国；或快捷追问"再换几个城市""更偏南方的城市""也看看国外的城市"
+const CITY_RE = /(住|定居|生活|发展|落脚|安家|搬家?|工作)(在|到|去)?(哪|什么地方|啥地方)|(去|在|往|到|搬)(哪|什么地方|啥地方)(里|儿|个城市|座城市)?(住|定居|生活|发展|落脚|安家|工作|好|比较好|合适)|(哪|什么|啥)(个|座|些)?城市|往哪(个)?(方位|边)(走|去|发展|住)|(哪个|什么)方位|换(个|座)?城市|换个地方(住|生活|发展)|移民|出国|去国外|到国外|国外(发展|生活|定居)|海外(发展|生活|定居)|定居|城市.{0,4}(推荐|呢)|(推荐|换|看看|偏|旺我).{0,8}城市|看看国外|只看国内|(国内|国外|海外)的?城市/;
+const ABROAD_RE = /出国|移民|海外|国外|外国|留学|abroad|润出去|日本|韩国|德国|欧洲|美国|加拿大|澳洲|澳大利亚|新西兰|英国|法国|荷兰|西班牙|葡萄牙|意大利|爱尔兰|北欧|芬兰|捷克|奥地利/i;
+const NO_ABROAD_RE = /(不|没)(想|打算|考虑|准备|去|太想)(出国|移民|去国外|国外)|只看国内|国内(的)?就(行|好|可以)|国内的?城市/;
+const COUNTRY_ALIAS: Record<string, string> = { 澳洲: '澳大利亚' };
+const PREF_RES: [string, RegExp][] = [
+  ['南', /南方|往南|偏南|南边|南部/], ['北', /北方|往北|偏北|北边|北部/], ['东', /东边|东部|偏东|往东|东方/], ['西', /西边|西部|偏西|往西|西方/],
+  ['沿海', /沿海|海边|靠海/], ['内陆', /内陆|不靠海/], ['大城市', /大城市|一线|省会|机会多/], ['小城市', /小城市|小城|二三线|三四线|县城/],
+  ['安静', /安静|慢节奏|养老|躺平|清净|不卷/], ['便宜', /便宜|房价低|成本低|性价比|消费低/], ['暖和', /暖和|温暖|不冷|怕冷|暖一点/],
+];
+const cityNames = (t: string) => CITY_CATALOG.filter((c) => t.includes(c.name)).map((c) => c.name);
+export const isCityAsk = (t: string) => CITY_RE.test(t);
+
+function cityContext(messages, geo) {
+  const users = messages.filter((m) => m.role === 'user').map((m) => m.content);
+  const last = users[users.length - 1] || '';
+  const recent = users.slice(-8).join('\n');
+  // anchor：大致所在位置，只用于就近排序（海外只到国家，坐标置 0 不参与距离计算）
+  let anchor: { lat: number; lng: number; country: string } | null = geo?.country
+    ? (geo.lat != null ? { lat: geo.lat, lng: geo.lng, country: geo.country } : geo.country !== '中国' ? { lat: 0, lng: 0, country: geo.country } : null) : null;
+  // 客户自己说了现在在哪（"我在杭州""现在住在德国"），以它为准
+  const m = recent.match(/(?:我|现在|目前|人|一直)(?:住)?(?:在|待在|住在)([^\s，。,.!！？?]{2,8})/g);
+  let saidAbroad = false;
+  for (const s of m || []) {
+    const place = s.replace(/^(我|现在|目前|人|一直)(住)?(在|待在|住在)/, '');
+    const c = placeCoord(place);
+    if (c) anchor = { lat: c.lat, lng: c.lng, country: c.country };
+    const cty = CITY_CATALOG.find((x) => x.country !== '中国' && (place.includes(x.country) || place.includes(x.name)));
+    if (cty) { anchor = { lat: cty.lat, lng: cty.lng, country: cty.country }; saidAbroad = true; }
+    else if (/国外|海外/.test(place)) saidAbroad = true;
+  }
+  const geoAbroad = !!(anchor?.country && anchor.country !== '中国');
+  // 海外意向：从最近一句往前找，最近一次明确表态为准（"只看国内"会覆盖之前的"想出国"）
+  let intent: boolean | null = null;
+  for (const u of users.slice(-8).reverse()) { if (NO_ABROAD_RE.test(u)) { intent = false; break; } if (ABROAD_RE.test(u)) { intent = true; break; } }
+  const abroad = intent ?? (saidAbroad || geoAbroad);
+  const countries = [...new Set(CITY_CATALOG.filter((c) => c.country !== '中国' && recent.includes(c.country)).map((c) => c.country)
+    .concat(Object.entries(COUNTRY_ALIAS).filter(([k]) => recent.includes(k)).map(([, v]) => v)))];
+  const prefer = PREF_RES.filter(([, re]) => re.test(last)).map(([k]) => k);
+  const exclude = /换|别的|其他|另外|还有/.test(last)
+    ? [...new Set(messages.filter((x) => x.role === 'assistant').slice(-4).flatMap((x) => cityNames(x.content)))] as string[] : [] as string[];
+  return { anchor, abroad, countries, prefer, exclude };
+}
+
+async function runCities(profile, q, messages, emit, ctx: any = {}) {
+  const nowYear = ctx.nowYear || new Date().getFullYear();
+  const chart: any = computeChart({ ...toInput(profile), nowYear });
+  const cc = cityContext(messages, ctx.geo);
+  const cctx = { anchor: cc.anchor, abroad: cc.abroad, countries: cc.countries, prefer: cc.prefer, exclude: cc.exclude };
+  let rec = recommendCities(chart, cctx);
+  if (rec.cities.length < 3 && cctx.exclude.length) rec = recommendCities(chart, { ...cctx, exclude: [] });
+  console.log(`[cities] abroad=${cc.abroad} near=${cc.anchor ? (cc.anchor.country === '中国' ? 'cn' : 'abroad') : 'n'} prefer=${cc.prefer.join('/') || '-'} ex=${cc.exclude.length} -> ${rec.cities.map((c) => c.name).join(',')}`);
+  const brief = cityChartBrief(chart);
+  const cities = rec.cities.map(({ score, ...c }) => c);
+  emit('cities', { brief, abroad: rec.abroad, cities });
+  const mv = moveYears(chart);
+  const curDy = chart.daYun.find((d) => d.startYear <= nowYear && d.endYear >= nowYear);
+  const moveText = [curDy ? `当前大运：${curDy.ganZhi}（${curDy.startYear}–${curDy.endYear}），十神${curDy.shiShen}` : '',
+    mv.length ? `利于迁动的年份：${mv.map((y) => `${y.year}年${y.ganZhi}${y.favorable ? '（喜用之年）' : ''}${y.yiMa ? '（逢驿马）' : ''}`).join('、')}` : '近几年没有特别突出的迁动之年，稳中求进即可',
+    chart.pro?.pillars?.some((p) => p.shenSha?.includes('驿马')) ? '原局带驿马：一生多走动、外出发展有利' : ''].filter(Boolean).join('\n');
+  const cand = rec.cities.map((c, i) => `${i + 1}. ${c.name}${c.country !== '中国' ? `（${c.country}）` : `（${c.prov}）`}：${c.reason}；适合：${c.work}${c.caution ? `；注意：${c.caution}` : ''}${c.value ? `；性价比：${c.value}` : ''}`).join('\n');
+  const mode = rec.abroad ? '【模式】客户对海外有意向：前几个是发达国家里性价比高的城市（不一定是首都、名城），后面是国内的备选。' : '【模式】只推荐国内城市。';
+  const t = readTemplate('cities.md');
+  const sys = fill(t.system, { CHART: chartToText(chart), BRIEF: brief, CANDIDATES: cand, MOVE: moveText, MODE: mode, NOW_YEAR: nowYear, NEXT_YEAR: nowYear + 1, LAST_YEAR: nowYear - 1, SUBJECT: subjectNote(profile.label), STYLE_GUIDE: loadStyle().guide, MEMORY: ctx.memory || '', MORE: rec.abroad ? '只看国内的也行' : '想看看国外的也可以' });
+  emit('bubble', {});
+  const top = rec.cities[0];
+  const fb = () => `你这个盘，${brief.replace(/ · /g, '，')}。住的地方讲究顺着喜用走：方位、水土合了你喜欢的五行，人就容易顺。\n\n我按这个思路挑了上面几座城市，${top ? `最贴的是${top.name}——${top.reason}` : ''}。${mv[0] ? `\n\n时机上，${mv[0].year}年${mv[0].ganZhi}${mv[0].favorable ? '是你的喜用之年' : '逢驿马'}，想动的话这一年起步比较顺。` : ''}\n\n想让师傅再换几个，或者说说你更喜欢南方、沿海还是安静些的地方，我再帮你挑。`;
+  const names = rec.cities.map((c) => c.name).join('、');
+  const pin = { role: 'system', content: `【本轮卡片上的城市】${names}。这一轮只讲这几座城市，按这个顺序；之前聊过的城市不要再提，也绝不能自己另挑城市。` };
+  const r = await streamText([{ role: 'system', content: sys }, ...messages.slice(-6), pin], emit, fb, { llm: { temperature: 0.7, maxTokens: 1000 } });
+  const xi = chart.xiYong?.[0];
+  const lean = { 火: '想要更偏南方的城市', 水: '想要沿海一点的城市', 木: '想要更偏东边的城市', 金: '想要更偏西边的城市', 土: '想要安静点的小城市' }[xi] || '想要更偏南方的城市';
+  emit('quick', { replies: ['再换几个城市', lean, rec.abroad ? '只看国内的城市' : '也看看国外的城市'] });
+  emit('done', { source: r.source });
+}
+
+interface ChatCtx { geo?: { country: string; lat?: number; lng?: number } | null; memory?: string; onScore?: (s: any) => void; current?: { id: string; label: string; data: any } | null; profiles?: { id: string; label: string; data: any }[] }
 async function handleChat(body, emit, ctx: ChatCtx = {}) {
   const { messages, pending, profile: bodyProfile, action, nowYear: ny, ui } = sanitize(body || {});
   const nowYear = ny || new Date().getFullYear();
@@ -408,6 +485,7 @@ async function handleChat(body, emit, ctx: ChatCtx = {}) {
       if (gate) gate.then((ok) => ok && emit('bubble', {})); else emit('bubble', {}); // 推测执行时，气泡也等意图判断后再出
       return streamText([{ role: 'system', content: sys }, ...messages.slice(-12)], emit, () => followUpFallback(chart, q), { chart, scoreCtx, onScore, gate });
     };
+    if (isCityAsk(q) && !CORR_RE.test(q) && !COMPAT_RE.test(q) && !PERSON_RE.test(q)) { await runCities(profile, q, messages, emit, { ...ctx, nowYear }); return; }
     if (mightRoute(q)) {
       let release: (ok: boolean) => void;
       const gate = new Promise<boolean>((ok) => (release = ok));
@@ -538,10 +616,10 @@ async function runReading(prof, chart, messages, emit, ctx: { memory?: string; o
   if (subj) rm[0].content += `\n\n${subj}`;
   if (ctx.recast) rm[0].content += '\n\n【重要】客户刚更正了生辰，这是按新盘重新做的解读：旧盘及基于旧盘的结论全部作废，不要提及、对比或沿用，一切以上面的新排盘数据为准。';
   const r = await streamReadingParallel(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx, onScore: ctx.onScore, recast: ctx.recast, subject: prof.label && prof.label !== '我' ? prof.label : '' });
-  emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，直接问我就行。' });
+  emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，或者想知道去哪座城市更旺你，直接问我就行。' });
   emit('quick', { replies: suggestions(chart) });
   emit('done', { source: r.source });
   return r;
 }
 
-export { handleChat, runReading, runCompat, validateProfile, profileLine, readingIntro, sanitize };
+export { handleChat, runReading, runCompat, runCities, validateProfile, profileLine, readingIntro, sanitize };

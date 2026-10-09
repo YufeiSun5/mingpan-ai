@@ -34,6 +34,7 @@ export function applyEvent(s0: ChatState, [ev, d]: ChatEvent): ChatState {
     }
     case 'switch': return { ...s, items: [...s.items, { type: 'switch', profileId: d.profileId, label: d.label }] };
     case 'compat': return { ...s, items: [...s.items, { type: 'compat', card: d }] };
+    case 'cities': return { ...s, items: [...s.items, { type: 'cities', card: d }] };
     case 'profile': return { ...s, profile: d.profile, pending: null };
     case 'quick': return { ...s, quick: d.replies || [] };
     case 'error': return { ...s, items: [...s.items, { type: 'bot', text: d.error }] };
@@ -86,7 +87,7 @@ export function migrateState(raw: any): ChatState {
   if (!raw || typeof raw !== 'object') return freshState();
   const s = freshState();
   if (raw.cid) s.cid = String(raw.cid);
-  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart', 'confirm', 'switch', 'compat'].includes(x.type)  /* 旧版评分卡不再展示 */) : [];
+  s.items = Array.isArray(raw.items) ? raw.items.filter((x: any) => x && ['user', 'bot', 'chart', 'confirm', 'switch', 'compat', 'cities'].includes(x.type)  /* 旧版评分卡不再展示 */) : [];
   if (typeof raw.profileId === 'string') s.profileId = raw.profileId; else if (raw.profile?.id) s.profileId = raw.profile.id;
   if (typeof raw.label === 'string') s.label = raw.label; else if (raw.profile?.label) s.label = raw.profile.label;
   s.llm = Array.isArray(raw.llm) ? raw.llm.filter((m: any) => m && typeof m.content === 'string') : [];

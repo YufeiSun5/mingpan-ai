@@ -15,6 +15,9 @@ export interface Profile {
 /** 命主列表项（GET /api/v1/profiles） */
 export interface ProfileSummary { id: string; label: string; name: string; data: Profile; cid: string | null; version: number; bazi: string; updatedAt: string }
 /** 合盘摘要卡片（程序计算的两人关系） */
+/** 宜居城市卡片（程序按命盘排序；理由只引用盘面，不涉及所在地） */
+export interface CityCardItem { name: string; country: string; prov: string; dir: string; gua: string; dirWx: string; reason: string; work: string; caution?: string; value?: string; tags: string[] }
+export interface CityCard { brief: string; abroad: boolean; cities: CityCardItem[] }
 export interface CompatCard { a: { label: string; bazi: string }; b: { label: string; bazi: string }; good: string[]; bad: string[] }
 export interface Pillar {
   label: string; gan: string; zhi: string; ganWx: Wx; zhiWx: Wx; shiShenGan: string; shiShenZhi: string[];
@@ -56,7 +59,7 @@ export interface LlmMessage { role: 'user' | 'assistant'; content: string }
 export type ChatEvent =
   | ['text', { text: string }] | ['delta', { text: string }] | ['bubble', Record<string, never>]
   | ['chart', { chart: Chart }] | ['pending', { pending: Profile | null }]
-  | ['switch', { profileId: string; label: string }] | ['compat', CompatCard]
+  | ['switch', { profileId: string; label: string }] | ['compat', CompatCard] | ['cities', CityCard]
   | ['profile', { profile: Profile }] | ['quick', { replies: string[] }] | ['error', { error: string }]
   | ['crisis', Record<string, never>] | ['ping', Record<string, never>] | ['done', { source?: string }];
 export type ChatEventName = ChatEvent[0];
@@ -71,4 +74,5 @@ export type ChatItem =
   | { type: 'confirm'; profile: Profile; status: 'editing' | 'confirmed' | 'moved'; id?: string; correction?: Profile['correction']; stale?: boolean; cid?: string }
   /** 建议切换到已有命主 */
   | { type: 'switch'; profileId: string; label: string }
-  | { type: 'compat'; card: CompatCard };
+  | { type: 'compat'; card: CompatCard }
+  | { type: 'cities'; card: CityCard };

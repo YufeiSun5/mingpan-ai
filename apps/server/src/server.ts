@@ -6,7 +6,8 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { handleReading, handleChart } from './handler';
 import { handleChat, runReading, runCompat, validateProfile, profileLine, readingIntro, sanitize, whoOf } from './chat';
-import { chartDiffText, changeSentence, briefBazi, timeKey } from '@mingpan/core';
+import { chartDiffText, changeSentence, briefBazi, timeKey, recommendCities, cityChartBrief, PREF_KEYS } from '@mingpan/core';
+import { geoOfReq } from './geo';
 import { getProvider } from './llm';
 import * as rateLimit from './ratelimit';
 import { securityHeaders } from './security';
@@ -102,7 +103,7 @@ async function runChat(req: Request, emit: Emit) {
     score = sc;
     console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`);
   };
-  try { await handleChat(body, (e, d) => { if (e !== 'score') tap(e, d); }, { memory, onScore, current, profiles }); }
+  try { await handleChat(body, (e, d) => { if (e !== 'score') tap(e, d); }, { memory, onScore, current, profiles, geo: geoOfReq(req) }); }
   catch (e) { console.error(e); tap('error', { error: '大师走神了，请再发一次～' }); tap('done', {}); }
   if (uid && cid) {
     const lastUser = [...(body.messages || [])].reverse().find((m) => m?.role === 'user')?.content;
@@ -249,6 +250,22 @@ app.delete('/api/v1/profiles/:id', light, wrap(async (req) => {
 app.get('/api/v1/profiles/:id/versions', wrap(async (req) => {
   const uid = needUser(req);
   return { versions: (await store.getVersions(uid, String(req.params.id))).map((x) => ({ version: x.version, data: x.data, bazi: x.chart ? briefBazi(x.chart) : '', createdAt: x.createdAt })) };
+}));
+// 宜居城市（纯程序排序，不调模型）：body { abroad?, prefer?: string[], exclude?: string[], countries?: string[] }
+// 所在地区只在服务端用于就近排序，不出现在返回里
+app.post('/api/v1/profiles/:id/cities', smallJson, limited, wrap(async (req) => {
+  const uid = needUser(req);
+  const p = await store.getProfile(uid, String(req.params.id)).catch(() => null);
+  if (!p) throw Object.assign(new Error('档案不存在'), { status: 404 });
+  const v = validateProfile(p.data, nowYearOf(req.body));
+  if (v.error) throw Object.assign(new Error(v.error), { status: 422 });
+  const b = req.body || {};
+  const strs = (x: any, ok?: string[]) => (Array.isArray(x) ? x.filter((s) => typeof s === 'string' && s.length <= 12 && (!ok || ok.includes(s))).slice(0, 20) : []);
+  const g = geoOfReq(req);
+  const anchor = g?.country ? (g.lat != null ? { lat: g.lat, lng: g.lng!, country: g.country } : g.country !== '中国' ? { lat: 0, lng: 0, country: g.country } : null) : null;
+  const abroad = typeof b.abroad === 'boolean' ? b.abroad : !!(anchor && anchor.country !== '中国');
+  const r = recommendCities(v.chart, { anchor, abroad, prefer: strs(b.prefer, PREF_KEYS), exclude: strs(b.exclude), countries: strs(b.countries) });
+  return { brief: cityChartBrief(v.chart), abroad: r.abroad, cities: r.cities.map(({ score, ...c }) => c) };
 }));
 // 详批：SSE / ?stream=0 / ?mode=poll；recast=true 表示更正生辰后的重新解读
 app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) => {

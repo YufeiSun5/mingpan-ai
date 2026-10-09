@@ -338,6 +338,26 @@ button,input,textarea{font-family:inherit}
 .hp-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .hp-tags i{font-style:normal;font-size:11.5px;padding:2px 8px;border-radius:6px;line-height:1.6}
 .hp-tags i.g{background:var(--jin-soft);color:#7d6236}.hp-tags i.b{background:var(--zhu-soft);color:var(--zhu)}
+.ct-card{max-width:min(calc(100% - 44px),420px);padding:13px 14px 12px}
+.ct-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;margin:0 2px 6px}
+.ct-h b{font-family:var(--display);font-size:15px;font-weight:700;letter-spacing:3px}
+.ct-h span{font-size:12px;color:var(--ink3);letter-spacing:.5px}
+.ct-sec{font-size:11.5px;color:var(--jin);letter-spacing:2px;margin:10px 2px 4px}
+.ct-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.ct-i{background:var(--surface2);border:.5px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+.ct-t{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;margin-bottom:4px}
+.ct-t b{font-family:var(--display);font-size:17px;letter-spacing:2px;margin-right:2px}
+.ct-t i{font-style:normal;font-size:11px;line-height:1.6;padding:1px 7px;border-radius:6px;background:var(--line);color:var(--ink2);white-space:nowrap}
+.ct-t i.ct-wx{background:var(--jin-soft);color:#7d6236}
+.ct-t i.w-mu{color:var(--wood);background:rgba(79,138,99,.1)}.ct-t i.w-huo{color:var(--fire);background:rgba(201,80,61,.09)}.ct-t i.w-tu{color:var(--earth);background:rgba(167,122,69,.11)}
+.ct-t i.w-jin{color:#7d6236;background:var(--jin-soft)}.ct-t i.w-shui{color:var(--water);background:rgba(58,102,144,.1)}
+.ct-r{margin:0 0 4px;font-size:13.5px;line-height:1.6;color:var(--ink)}
+.ct-l{display:flex;gap:8px;margin:2px 0 0;font-size:12.5px;line-height:1.55;color:var(--ink2)}
+.ct-l em{flex:none;font-style:normal;font-size:11px;color:var(--jin);border:.5px solid rgba(168,134,79,.4);border-radius:5px;padding:0 5px;height:18px;line-height:17px;margin-top:1px}
+.ct-l.ct-c{color:var(--ink3)}.ct-l.ct-c em{color:var(--zhu);border-color:rgba(178,58,48,.3)}
+.ct-foot{margin:8px 2px 0;font-size:11px;color:var(--ink4)}
+@container (min-width:560px){.ct-list{grid-template-columns:1fr 1fr}}
+@media (max-width:375px){.ct-card{padding:11px 8px 10px;max-width:calc(100% - 40px)}.ct-i{padding:9px 10px}.ct-r{font-size:13px}}
 
 /* 命主切换按钮（顶栏右侧） */
 .who-btn{flex:none;display:flex;align-items:center;gap:8px;max-width:42vw;min-height:var(--tap);border:.5px solid var(--line2);background:var(--surface);color:var(--ink);font-size:14px;border-radius:999px;padding:4px 14px 4px 5px;transition:background .2s}
@@ -497,7 +517,7 @@ button{touch-action:manipulation;cursor:pointer}button:disabled{cursor:default}
   .bubble,.row.me .bubble{max-width:70%}
   .row.me .bubble{max-width:100%}
   .card{max-width:min(680px,calc(100% - 46px))}
-  .cf-card,.hp-card{max-width:min(680px,calc(100% - 46px))}
+  .cf-card,.hp-card,.ct-card{max-width:min(680px,calc(100% - 46px))}
   .sw-card{max-width:min(460px,calc(100% - 46px))}
   .side-card,.row-chart .card{max-width:none}
   .side{scrollbar-width:none}.side::-webkit-scrollbar{display:none}
