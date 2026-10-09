@@ -267,6 +267,7 @@ app.post('/api/v1/profiles/:id/cities', smallJson, limited, wrap(async (req) => 
   const r = recommendCities(v.chart, { anchor, abroad, prefer: strs(b.prefer, PREF_KEYS), exclude: strs(b.exclude), countries: strs(b.countries) });
   return { brief: cityChartBrief(v.chart), abroad: r.abroad, cities: r.cities.map(({ score, ...c }) => c) };
 }));
+const autoShown = new Set<string>();
 // 详批：SSE / ?stream=0 / ?mode=poll；recast=true 表示更正生辰后的重新解读
 app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) => {
   const uid = identify(req);
@@ -279,10 +280,14 @@ app.post('/api/v1/profiles/:id/reading', smallJson, limited, async (req, res) =>
   const { messages } = sanitize(req.body || {});
   const memory = cid ? await memoryContext(uid, cid, p.id).catch(() => '') : '';
   const recast = !!req.body?.recast && p.version > 1;
+  // 宜居城市卡片：每个命盘版本自动出一次（重新确认同一版本不再重复）；更正生辰后新版本会再出
+  const autoKey = `${uid}:${p.id}:${p.version || 1}`;
+  const autoCities = !autoShown.has(autoKey);
+  if (autoCities) { autoShown.add(autoKey); if (autoShown.size > 20000) autoShown.clear(); }
   await eventRoute(req, res, `[reading] ${req.ip}${recast ? ' recast' : ''}`, async (emit) => {
     let text = '', score = null;
     const tap: Emit = (e, d) => { if (e === 'delta') text += d.text; emit(e, d); };
-    try { await runReading({ ...v.profile, label: p.label || '我' }, v.chart, messages, tap, { memory, recast, onScore: (sc) => { score = sc; console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`); } }); }
+    try { await runReading({ ...v.profile, label: p.label || '我' }, v.chart, messages, tap, { memory, recast, geo: geoOfReq(req), autoCities, onScore: (sc) => { score = sc; console.log(`[score] health=${sc.health} verdict=${sc.verdict} flags=${sc.flags.join(',') || '-'} ${sc.dims.map((x) => x.k + x.score).join(' ')}`); } }); }
     catch (e) { console.error(e); emit('error', { error: '大师走神了，请再试一次～' }); emit('done', {}); }
     if (cid && text) recordTurn(uid, cid, { assistant: text, score, pid: p.id }).catch((e) => console.error('[memory] record', e.message));
   });

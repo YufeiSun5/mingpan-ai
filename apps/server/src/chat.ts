@@ -604,7 +604,22 @@ function validateProfile(raw, nowYear): any {
 }
 
 /** 详批：评分（仅服务端）→ 分节并行流式 → 收尾 + 推荐追问 */
-async function runReading(prof, chart, messages, emit, ctx: { memory?: string; onScore?: (s: any) => void; recast?: boolean } = {}) {
+/** 详批后自动附上的宜居城市卡片：一句命盘引子（点名城市，便于"再换几个"排除）+ 卡片；海外模式只看聊天里的表态 */
+function autoCityCard(prof, chart, messages, emit, geo) {
+  const msgs = [...(prof.question ? [{ role: 'user', content: prof.question }] : []), ...(messages || [])];
+  const cc = cityContext(msgs, geo);
+  const rec = recommendCities(chart, { anchor: cc.anchor, abroad: cc.abroad, countries: cc.countries, prefer: [], exclude: [] });
+  if (!rec.cities.length) return false;
+  console.log(`[cities auto] abroad=${cc.abroad} near=${cc.anchor ? (cc.anchor.country === '中国' ? 'cn' : 'abroad') : 'n'} -> ${rec.cities.map((c) => c.name).join(',')}`);
+  const who = whoOf(prof.label), xi = (chart.xiYong || []).join('');
+  const dirs = [...new Set(rec.cities.map((c) => `${c.dir}方`))].slice(0, 3).join('、');
+  const names = rec.cities.map((c) => c.name).join('、');
+  emit('text', { text: `住的地方也顺带帮${who === '你' ? '你' : who}看了：${who}喜${xi}，${dirs}这些方位、水土合${who === '你' ? '你' : '命主'}的喜用。按盘挑了${names}${rec.abroad ? '（前几个是海外性价比高的）' : ''}，理由都写在卡片上了。` });
+  emit('cities', { brief: cityChartBrief(chart), abroad: rec.abroad, cities: rec.cities.map(({ score, ...c }) => c) });
+  return true;
+}
+
+async function runReading(prof, chart, messages, emit, ctx: { memory?: string; onScore?: (s: any) => void; recast?: boolean; geo?: any; autoCities?: boolean } = {}) {
   const nowYear = chart.nowYear;
   emit('bubble', {});
   const questions = { topics: prof.topics || [], text: prof.question || '' };
@@ -616,8 +631,15 @@ async function runReading(prof, chart, messages, emit, ctx: { memory?: string; o
   if (subj) rm[0].content += `\n\n${subj}`;
   if (ctx.recast) rm[0].content += '\n\n【重要】客户刚更正了生辰，这是按新盘重新做的解读：旧盘及基于旧盘的结论全部作废，不要提及、对比或沿用，一切以上面的新排盘数据为准。';
   const r = await streamReadingParallel(rm, emit, () => generateFallback(chart, questions), { chart, scoreCtx, onScore: ctx.onScore, recast: ctx.recast, subject: prof.label && prof.label !== '我' ? prof.label : '' });
-  emit('text', { text: '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，或者想知道去哪座城市更旺你，直接问我就行。' });
-  emit('quick', { replies: suggestions(chart) });
+  // 详批后直接给出宜居城市（每个命盘版本自动一次；由调用方用 autoCities 控制），不必等客户来问
+  let cityShown = false;
+  if (ctx.autoCities !== false) {
+    try { cityShown = autoCityCard(prof, chart, messages, emit, ctx.geo); } catch (e) { console.error('[cities auto]', e.message); }
+  }
+  emit('text', { text: cityShown
+    ? '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，直接问我就行；城市想换几个、或者想看看国外的，也跟我说。'
+    : '大概就是这些。还有哪儿想细问的，某一年的运势、感情、工作上的选择，或者想知道去哪座城市更旺你，直接问我就行。' });
+  emit('quick', { replies: cityShown ? suggestions(chart).flatMap((q) => (q === '我适合住哪个城市？' ? ['再换几个城市', '也看看国外的城市'] : [q])) : suggestions(chart) });
   emit('done', { source: r.source });
   return r;
 }
