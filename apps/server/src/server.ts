@@ -263,7 +263,7 @@ app.post('/api/v1/profiles/:id/cities', smallJson, limited, wrap(async (req) => 
   const strs = (x: any, ok?: string[]) => (Array.isArray(x) ? x.filter((s) => typeof s === 'string' && s.length <= 12 && (!ok || ok.includes(s))).slice(0, 20) : []);
   const g = geoOfReq(req);
   const anchor = g?.country ? (g.lat != null ? { lat: g.lat, lng: g.lng!, country: g.country } : g.country !== '中国' ? { lat: 0, lng: 0, country: g.country } : null) : null;
-  const abroad = typeof b.abroad === 'boolean' ? b.abroad : !!(anchor && anchor.country !== '中国');
+  const abroad = b.abroad === true; // 海外模式需显式请求；所在地区只用于就近排序
   const r = recommendCities(v.chart, { anchor, abroad, prefer: strs(b.prefer, PREF_KEYS), exclude: strs(b.exclude), countries: strs(b.countries) });
   return { brief: cityChartBrief(v.chart), abroad: r.abroad, cities: r.cities.map(({ score, ...c }) => c) };
 }));

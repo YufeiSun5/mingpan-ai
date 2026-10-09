@@ -384,11 +384,11 @@ function cityContext(messages, geo) {
     if (cty) { anchor = { lat: cty.lat, lng: cty.lng, country: cty.country }; saidAbroad = true; }
     else if (/国外|海外/.test(place)) saidAbroad = true;
   }
-  const geoAbroad = !!(anchor?.country && anchor.country !== '中国');
   // 海外意向：从最近一句往前找，最近一次明确表态为准（"只看国内"会覆盖之前的"想出国"）
   let intent: boolean | null = null;
   for (const u of users.slice(-8).reverse()) { if (NO_ABROAD_RE.test(u)) { intent = false; break; } if (ABROAD_RE.test(u)) { intent = true; break; } }
-  const abroad = intent ?? (saidAbroad || geoAbroad);
+  // 模式只看聊天里的表态（想出国 / 说自己在国外 / 点了追问）；所在地区只用于就近排序，不单独决定海外模式
+  const abroad = intent ?? saidAbroad;
   const countries = [...new Set(CITY_CATALOG.filter((c) => c.country !== '中国' && recent.includes(c.country)).map((c) => c.country)
     .concat(Object.entries(COUNTRY_ALIAS).filter(([k]) => recent.includes(k)).map(([, v]) => v)))];
   const prefer = PREF_RES.filter(([, re]) => re.test(last)).map(([k]) => k);
