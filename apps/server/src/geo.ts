@@ -11,9 +11,9 @@ function query() {
   return q;
 }
 const PRIVATE = /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|::1$|fc|fd|fe80:)/i;
-/** 客户端 IP：优先 Cloudflare 头，其次 trust proxy 解析后的 req.ip */
+/** 客户端 IP：trust proxy 解析后的 req.ip（X-Forwarded-For）；站点在 Cloudflare 后面时设 TRUST_CF_IP=1 改用 cf-connecting-ip（否则该头可被伪造） */
 export function clientIp(req: Request): string {
-  const cf = req.headers['cf-connecting-ip'];
+  const cf = process.env.TRUST_CF_IP === '1' ? req.headers['cf-connecting-ip'] : undefined;
   const ip = (typeof cf === 'string' && cf.trim()) || req.ip || '';
   return ip.replace(/^::ffff:/, '');
 }
